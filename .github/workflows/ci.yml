@@ -2,11 +2,9 @@ name: CI
 
 on:
   push:
-    branches:
-      - '**'
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -29,10 +27,17 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
+          dotnet-quality: 'preview' # remove once .NET 10 ships as stable
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
+          restore-keys: ${{ runner.os }}-nuget-
 
       - name: Build solution
-        run: dotnet build QueueTi.slnx --configuration Release
+        run: dotnet build QueueTi.slnx --configuration Release --no-restore
 
       - name: Run tests
         run: dotnet test QueueTi.Client.Tests/ --configuration Release --no-build --logger trx
@@ -42,5 +47,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: '**/*.trx'
+          path: '**/TestResults/**/*.trx'
           retention-days: 7
