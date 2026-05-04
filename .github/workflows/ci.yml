@@ -36,6 +36,9 @@ jobs:
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
           restore-keys: ${{ runner.os }}-nuget-
 
+      - name: Restore dependencies
+        run: dotnet restore QueueTi.slnx
+
       - name: Build solution
         run: dotnet build QueueTi.slnx --configuration Release --no-restore
 
