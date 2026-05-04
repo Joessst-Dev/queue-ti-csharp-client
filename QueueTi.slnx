@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="QueueTi.Client.Tests/QueueTi.Client.Tests.csproj" />
+  <Project Path="QueueTi.Client/QueueTi.Client.csproj" />
+</Solution>
