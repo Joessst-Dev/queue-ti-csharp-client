@@ -53,10 +53,11 @@ public sealed class Consumer
 
                 using var stream = _grpcClient.Subscribe(request, cancellationToken: ct);
 
-                backoff = _minBackoff;
-
+                var resetBackoff = true;
                 await foreach (var response in stream.ResponseStream.ReadAllAsync(ct))
                 {
+                    if (resetBackoff) { backoff = _minBackoff; resetBackoff = false; }
+
                     var message = QueueTiMessage.FromSubscribeResponse(response, _options.ConsumerGroup, _grpcClient);
 
                     await semaphore.WaitAsync(ct);
@@ -66,7 +67,7 @@ public sealed class Consumer
                         try
                         {
                             await handler(message, ct);
-                            await message.AckAsync(ct);
+                            await message.AckAsync(CancellationToken.None);
                         }
                         catch (OperationCanceledException) when (ct.IsCancellationRequested)
                         {
@@ -88,7 +89,7 @@ public sealed class Consumer
                         {
                             semaphore.Release();
                         }
-                    }, ct);
+                    });
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -98,13 +99,13 @@ public sealed class Consumer
             catch (RpcException ex)
             {
                 _logger.LogWarning(ex, "Subscribe stream ended with gRPC error; reconnecting in {Backoff}.", backoff);
-                await DelayWithCancellation(backoff, ct);
+                await Task.Delay(backoff, ct);
                 backoff = Min(backoff * 2, _maxBackoff);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error in subscribe loop; reconnecting in {Backoff}.", backoff);
-                await DelayWithCancellation(backoff, ct);
+                await Task.Delay(backoff, ct);
                 backoff = Min(backoff * 2, _maxBackoff);
             }
         }
@@ -138,7 +139,7 @@ public sealed class Consumer
 
                 if (response.Messages.Count == 0)
                 {
-                    await DelayWithCancellation(backoff, ct);
+                    await Task.Delay(backoff, ct);
                     backoff = Min(backoff * 2, _maxBackoff);
                     continue;
                 }
@@ -158,29 +159,17 @@ public sealed class Consumer
             catch (RpcException ex)
             {
                 _logger.LogWarning(ex, "BatchDequeue failed with gRPC error; retrying in {Backoff}.", backoff);
-                await DelayWithCancellation(backoff, ct);
+                await Task.Delay(backoff, ct);
                 backoff = Min(backoff * 2, _maxBackoff);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error in batch consume loop; retrying in {Backoff}.", backoff);
-                await DelayWithCancellation(backoff, ct);
+                await Task.Delay(backoff, ct);
                 backoff = Min(backoff * 2, _maxBackoff);
             }
         }
     }
 
     private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
-
-    private static Task DelayWithCancellation(TimeSpan delay, CancellationToken ct)
-    {
-        try
-        {
-            return Task.Delay(delay, ct);
-        }
-        catch (OperationCanceledException)
-        {
-            return Task.CompletedTask;
-        }
-    }
 }

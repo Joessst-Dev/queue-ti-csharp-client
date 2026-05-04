@@ -1,3 +1,4 @@
+using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,6 +17,7 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
     private readonly QueueTiClientOptions _options;
     private readonly TokenStore? _tokenStore;
     private readonly GrpcChannel? _ownedChannel;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<QueueTiClient> _logger;
     private readonly CancellationTokenSource _refreshCts = new();
     private readonly Task _refreshTask;
@@ -23,36 +25,38 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
     public QueueTiClient(
         QueueService.QueueServiceClient grpcClient,
         QueueTiClientOptions options,
-        ILogger<QueueTiClient>? logger = null)
+        ILoggerFactory? loggerFactory = null)
+        : this(grpcClient, options, tokenStore: null, ownedChannel: null, loggerFactory)
+    {
+    }
+
+    internal QueueTiClient(
+        QueueService.QueueServiceClient grpcClient,
+        QueueTiClientOptions options,
+        TokenStore? tokenStore,
+        GrpcChannel? ownedChannel,
+        ILoggerFactory? loggerFactory)
     {
         ArgumentNullException.ThrowIfNull(grpcClient);
         ArgumentNullException.ThrowIfNull(options);
 
         _grpcClient = grpcClient;
         _options = options;
-        _logger = logger ?? NullLogger<QueueTiClient>.Instance;
+        _ownedChannel = ownedChannel;
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _logger = _loggerFactory.CreateLogger<QueueTiClient>();
 
-        if (options.BearerToken is not null)
-            _tokenStore = new TokenStore(options.BearerToken);
+        _tokenStore = tokenStore ?? (options.BearerToken is not null ? new TokenStore(options.BearerToken) : null);
 
         _refreshTask = options.TokenRefresher is not null && _tokenStore is not null
             ? RunTokenRefreshLoopAsync(_refreshCts.Token)
             : Task.CompletedTask;
     }
 
-    private QueueTiClient(
-        GrpcChannel channel,
-        QueueTiClientOptions options,
-        ILogger<QueueTiClient>? logger)
-        : this(new QueueService.QueueServiceClient(channel), options, logger)
-    {
-        _ownedChannel = channel;
-    }
-
     public static QueueTiClient Create(
         string address,
         QueueTiClientOptions options,
-        ILogger<QueueTiClient>? logger = null)
+        ILoggerFactory? loggerFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(address);
         ArgumentNullException.ThrowIfNull(options);
@@ -65,7 +69,21 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
         options.ConfigureChannel?.Invoke(channelOptions);
 
         var channel = GrpcChannel.ForAddress(address, channelOptions);
-        return new QueueTiClient(channel, options, logger);
+
+        if (options.BearerToken is not null)
+        {
+            var store = new TokenStore(options.BearerToken);
+            var invoker = channel.Intercept(new BearerTokenInterceptor(store));
+            var grpcClient = new QueueService.QueueServiceClient(invoker);
+            return new QueueTiClient(grpcClient, options, tokenStore: store, ownedChannel: channel, loggerFactory);
+        }
+
+        return new QueueTiClient(
+            new QueueService.QueueServiceClient(channel),
+            options,
+            tokenStore: null,
+            ownedChannel: channel,
+            loggerFactory);
     }
 
     public Producer NewProducer() => new(_grpcClient);
@@ -73,7 +91,7 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
     public Consumer NewConsumer(string topic, ConsumerOptions? opts = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(topic);
-        return new Consumer(_grpcClient, topic, opts ?? new ConsumerOptions(), _logger as ILogger<Consumer>);
+        return new Consumer(_grpcClient, topic, opts ?? new ConsumerOptions(), _loggerFactory.CreateLogger<Consumer>());
     }
 
     public void SetToken(string token)
@@ -120,7 +138,8 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
                     return;
                 }
 
-                backoff = backoff * 2 > _refreshMaxBackoff ? _refreshMaxBackoff : backoff * 2;
+                var next = backoff * 2;
+                backoff = next < _refreshMaxBackoff ? next : _refreshMaxBackoff;
             }
         }
     }
@@ -139,7 +158,12 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
 
         _tokenStore?.Dispose();
         _refreshCts.Dispose();
-        _ownedChannel?.Dispose();
+
+        if (_ownedChannel is not null)
+        {
+            _ownedChannel.ShutdownAsync().GetAwaiter().GetResult();
+            _ownedChannel.Dispose();
+        }
     }
 
     public async ValueTask DisposeAsync()

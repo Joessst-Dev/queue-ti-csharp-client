@@ -35,14 +35,14 @@ public sealed class ConsumerTests : IAsyncLifetime
         await _server.Fake.EnqueueForTestAsync(topic, payload);
 
         // Act (When)
-        var consumeTask = consumer.ConsumeAsync(async (msg, ct) =>
+        var consumeTask = consumer.ConsumeAsync((msg, ct) =>
         {
             received.TrySetResult(msg);
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }, cts.Token);
 
         var message = await received.Task;
-        await Task.Delay(100); // let Ack complete
+        await _server.Fake.WaitForAckAsync(cts.Token);
         await cts.CancelAsync();
 
         try { await consumeTask; } catch (OperationCanceledException) { }
@@ -67,10 +67,9 @@ public sealed class ConsumerTests : IAsyncLifetime
         await _server.Fake.EnqueueForTestAsync(topic, payload);
 
         // Act (When)
-        var consumeTask = consumer.ConsumeAsync(async (msg, ct) =>
+        var consumeTask = consumer.ConsumeAsync((msg, ct) =>
         {
             handlerCalled.TrySetResult();
-            await Task.CompletedTask;
             throw new InvalidOperationException("Simulated handler failure");
         }, cts.Token);
 
@@ -102,11 +101,11 @@ public sealed class ConsumerTests : IAsyncLifetime
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         // Act (When)
-        var consumeTask = consumer.ConsumeBatchAsync(5, async (messages, ct) =>
+        var consumeTask = consumer.ConsumeBatchAsync(5, (messages, ct) =>
         {
             receivedBatch = messages;
             batchReceived.TrySetResult();
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }, cts.Token);
 
         await batchReceived.Task;

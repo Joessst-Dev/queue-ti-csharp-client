@@ -19,13 +19,22 @@ public static class ServiceCollectionExtensions
         var options = new QueueTiClientOptions();
         configure(options);
 
-        services.AddGrpcClient<QueueService.QueueServiceClient>(o => o.Address = new Uri(address));
+        var grpcClientBuilder = services.AddGrpcClient<QueueService.QueueServiceClient>(o => o.Address = new Uri(address));
 
+        TokenStore? sharedTokenStore = null;
+        if (options.BearerToken is not null)
+        {
+            sharedTokenStore = new TokenStore(options.BearerToken);
+            var interceptor = new BearerTokenInterceptor(sharedTokenStore);
+            grpcClientBuilder.AddInterceptor(() => interceptor);
+        }
+
+        var capturedTokenStore = sharedTokenStore;
         services.AddSingleton(sp =>
         {
             var grpcClient = sp.GetRequiredService<QueueService.QueueServiceClient>();
-            var logger = sp.GetService<ILogger<QueueTiClient>>();
-            return new QueueTiClient(grpcClient, options, logger);
+            var loggerFactory = sp.GetService<ILoggerFactory>();
+            return new QueueTiClient(grpcClient, options, tokenStore: capturedTokenStore, ownedChannel: null, loggerFactory);
         });
 
         return services;

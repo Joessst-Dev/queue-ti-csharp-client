@@ -13,9 +13,13 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
     private readonly ConcurrentBag<string> _ackedIds = [];
     private readonly ConcurrentBag<(string id, string reason)> _nackedMessages = [];
     private readonly ConcurrentQueue<DequeueResponse> _dequeueQueue = new();
+    private readonly SemaphoreSlim _ackSignal = new(0);
 
     public IReadOnlyList<string> AckedIds => _ackedIds.ToList();
     public IReadOnlyList<(string id, string reason)> NackedMessages => _nackedMessages.ToList();
+
+    public Task WaitForAckAsync(CancellationToken ct = default) =>
+        _ackSignal.WaitAsync(ct);
 
     public override Task<EnqueueResponse> Enqueue(EnqueueRequest request, ServerCallContext context)
     {
@@ -41,30 +45,38 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
 
     public override Task<DequeueResponse> Dequeue(DequeueRequest request, ServerCallContext context)
     {
-        if (_dequeueQueue.TryDequeue(out var msg) && msg.Topic == request.Topic)
-            return Task.FromResult(msg);
+        var skipped = new List<DequeueResponse>();
+        DequeueResponse? found = null;
 
-        return Task.FromResult(new DequeueResponse());
+        while (_dequeueQueue.TryDequeue(out var msg))
+        {
+            if (msg.Topic == request.Topic && found is null) found = msg;
+            else skipped.Add(msg);
+            if (found is not null) break;
+        }
+        foreach (var msg in skipped) _dequeueQueue.Enqueue(msg);
+        return Task.FromResult(found ?? new DequeueResponse());
     }
 
     public override Task<BatchDequeueResponse> BatchDequeue(BatchDequeueRequest request, ServerCallContext context)
     {
         var response = new BatchDequeueResponse();
+        var skipped = new List<DequeueResponse>();
         var taken = 0;
+
         while (taken < request.Count && _dequeueQueue.TryDequeue(out var msg))
         {
-            if (msg.Topic == request.Topic)
-            {
-                response.Messages.Add(msg);
-                taken++;
-            }
+            if (msg.Topic == request.Topic) { response.Messages.Add(msg); taken++; }
+            else skipped.Add(msg);
         }
+        foreach (var msg in skipped) _dequeueQueue.Enqueue(msg);
         return Task.FromResult(response);
     }
 
     public override Task<AckResponse> Ack(AckRequest request, ServerCallContext context)
     {
         _ackedIds.Add(request.Id);
+        _ackSignal.Release();
         return Task.FromResult(new AckResponse());
     }
 
