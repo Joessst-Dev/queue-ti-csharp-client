@@ -38,3 +38,9 @@ publish/
 *.env
 appsettings.local.json
 appsettings.Development.json
+
+# Claude
+.claude/worktrees
+.claude/settings.local.json
+.claude/agent-memory/
+.claude/projects/
