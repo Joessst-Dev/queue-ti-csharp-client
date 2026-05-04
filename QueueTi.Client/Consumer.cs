@@ -99,13 +99,15 @@ public sealed class Consumer
             catch (RpcException ex)
             {
                 _logger.LogWarning(ex, "Subscribe stream ended with gRPC error; reconnecting in {Backoff}.", backoff);
-                await Task.Delay(backoff, ct);
+                try { await Task.Delay(backoff, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
                 backoff = Min(backoff * 2, _maxBackoff);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error in subscribe loop; reconnecting in {Backoff}.", backoff);
-                await Task.Delay(backoff, ct);
+                try { await Task.Delay(backoff, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
                 backoff = Min(backoff * 2, _maxBackoff);
             }
         }
@@ -159,13 +161,15 @@ public sealed class Consumer
             catch (RpcException ex)
             {
                 _logger.LogWarning(ex, "BatchDequeue failed with gRPC error; retrying in {Backoff}.", backoff);
-                await Task.Delay(backoff, ct);
+                try { await Task.Delay(backoff, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
                 backoff = Min(backoff * 2, _maxBackoff);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error in batch consume loop; retrying in {Backoff}.", backoff);
-                await Task.Delay(backoff, ct);
+                try { await Task.Delay(backoff, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
                 backoff = Min(backoff * 2, _maxBackoff);
             }
         }

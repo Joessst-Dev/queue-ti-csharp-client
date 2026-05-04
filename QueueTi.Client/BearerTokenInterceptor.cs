@@ -11,7 +11,10 @@ internal sealed class BearerTokenInterceptor : Interceptor
 
     private Metadata AddAuth(Metadata? headers)
     {
-        var meta = headers ?? new Metadata();
+        var meta = new Metadata();
+        if (headers is not null)
+            foreach (var entry in headers)
+                meta.Add(entry);
         meta.Add("authorization", "Bearer " + _store.Get());
         return meta;
     }

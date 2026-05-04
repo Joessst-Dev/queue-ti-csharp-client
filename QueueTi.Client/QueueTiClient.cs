@@ -21,6 +21,7 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
     private readonly ILogger<QueueTiClient> _logger;
     private readonly CancellationTokenSource _refreshCts = new();
     private readonly Task _refreshTask;
+    private int _disposed;
 
     public QueueTiClient(
         QueueService.QueueServiceClient grpcClient,
@@ -146,42 +147,35 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
 
     public void Dispose()
     {
-        _refreshCts.Cancel();
-        try
-        {
-            _refreshTask.GetAwaiter().GetResult();
-        }
-        catch
-        {
-            // refresh task is best-effort; do not propagate cancellation on dispose
-        }
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        _tokenStore?.Dispose();
-        _refreshCts.Dispose();
+        _refreshCts.Cancel();
+        try { _refreshTask.GetAwaiter().GetResult(); } catch { }
 
         if (_ownedChannel is not null)
         {
             _ownedChannel.ShutdownAsync().GetAwaiter().GetResult();
             _ownedChannel.Dispose();
         }
+
+        _tokenStore?.Dispose();
+        _refreshCts.Dispose();
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
         await _refreshCts.CancelAsync();
-        try
+        try { await _refreshTask; } catch { }
+
+        if (_ownedChannel is not null)
         {
-            await _refreshTask;
-        }
-        catch
-        {
-            // refresh task is best-effort; do not propagate cancellation on dispose
+            await _ownedChannel.ShutdownAsync();
+            _ownedChannel.Dispose();
         }
 
         _tokenStore?.Dispose();
         _refreshCts.Dispose();
-
-        if (_ownedChannel is not null)
-            await _ownedChannel.ShutdownAsync();
     }
 }
