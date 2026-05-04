@@ -21,6 +21,8 @@ public static class ServiceCollectionExtensions
 
         var grpcClientBuilder = services.AddGrpcClient<QueueService.QueueServiceClient>(o => o.Address = new Uri(address));
 
+        options.ConfigureHttpClientBuilder?.Invoke(grpcClientBuilder);
+
         TokenStore? sharedTokenStore = null;
         if (options.BearerToken is not null)
         {

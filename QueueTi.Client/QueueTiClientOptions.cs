@@ -1,3 +1,6 @@
+using Grpc.Net.ClientFactory;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace QueueTi;
 
 public sealed class QueueTiClientOptions
@@ -7,4 +10,6 @@ public sealed class QueueTiClientOptions
     public bool Insecure { get; set; }
 
     public Action<Grpc.Net.Client.GrpcChannelOptions>? ConfigureChannel { get; set; }
+
+    public Action<IHttpClientBuilder>? ConfigureHttpClientBuilder { get; set; }
 }

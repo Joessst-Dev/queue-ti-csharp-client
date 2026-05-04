@@ -56,6 +56,16 @@ public sealed class GrpcTestServer : IAsyncDisposable
         return new GrpcTestServer(host, channel, fake);
     }
 
+    public HttpClient CreateHttpClient()
+    {
+        var client = _host.GetTestServer().CreateClient();
+        client.DefaultRequestVersion = new Version(2, 0);
+        return client;
+    }
+
+    public HttpMessageHandler CreateHandler() =>
+        _host.GetTestServer().CreateHandler();
+
     public async ValueTask DisposeAsync()
     {
         Channel.Dispose();

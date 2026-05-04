@@ -14,15 +14,36 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
     private readonly ConcurrentBag<(string id, string reason)> _nackedMessages = [];
     private readonly ConcurrentQueue<DequeueResponse> _dequeueQueue = new();
     private readonly SemaphoreSlim _ackSignal = new(0);
+    private readonly SemaphoreSlim _nackSignal = new(0);
+    private readonly ConcurrentQueue<(StatusCode code, string detail)> _subscribeFaults = new();
+    private readonly ConcurrentQueue<Exception> _nackFaults = new();
+    private volatile Metadata? _lastRequestHeaders;
 
     public IReadOnlyList<string> AckedIds => _ackedIds.ToList();
     public IReadOnlyList<(string id, string reason)> NackedMessages => _nackedMessages.ToList();
+    public Metadata? LastRequestHeaders => _lastRequestHeaders;
+    public ConcurrentQueue<Metadata> RequestHeadersHistory { get; } = new();
+    public SubscribeRequest? LastSubscribeRequest { get; private set; }
+    public BatchDequeueRequest? LastBatchDequeueRequest { get; private set; }
+    public Metadata? LastSubscribeHeaders { get; private set; }
 
     public Task WaitForAckAsync(CancellationToken ct = default) =>
         _ackSignal.WaitAsync(ct);
 
+    public Task WaitForNackAsync(CancellationToken ct = default) =>
+        _nackSignal.WaitAsync(ct);
+
+    public void FailNextSubscribeWith(StatusCode code, string detail) =>
+        _subscribeFaults.Enqueue((code, detail));
+
+    public void FailNextNack(Exception ex) =>
+        _nackFaults.Enqueue(ex);
+
     public override Task<EnqueueResponse> Enqueue(EnqueueRequest request, ServerCallContext context)
     {
+        _lastRequestHeaders = context.RequestHeaders;
+        RequestHeadersHistory.Enqueue(context.RequestHeaders);
+
         var id = Guid.NewGuid().ToString();
         var stored = new DequeueResponse
         {
@@ -60,6 +81,8 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
 
     public override Task<BatchDequeueResponse> BatchDequeue(BatchDequeueRequest request, ServerCallContext context)
     {
+        LastBatchDequeueRequest = request;
+
         var response = new BatchDequeueResponse();
         var skipped = new List<DequeueResponse>();
         var taken = 0;
@@ -82,7 +105,11 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
 
     public override Task<NackResponse> Nack(NackRequest request, ServerCallContext context)
     {
+        if (_nackFaults.TryDequeue(out var fault))
+            throw fault;
+
         _nackedMessages.Add((request.Id, request.Error));
+        _nackSignal.Release();
         return Task.FromResult(new NackResponse());
     }
 
@@ -91,6 +118,12 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
         IServerStreamWriter<SubscribeResponse> responseStream,
         ServerCallContext context)
     {
+        LastSubscribeRequest = request;
+        LastSubscribeHeaders = context.RequestHeaders;
+
+        if (_subscribeFaults.TryDequeue(out var fault))
+            throw new RpcException(new Status(fault.code, fault.detail));
+
         var channel = _subscribeChannels.GetOrAdd(request.Topic,
             _ => Channel.CreateUnbounded<SubscribeResponse>());
 

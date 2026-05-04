@@ -121,4 +121,33 @@ public sealed class TokenStoreTests
         // Act (When) / Assert (Then)
         Assert.Throws<FormatException>(() => sut.GetExpiry());
     }
+
+    [Fact]
+    public void GetExpiry_GivenPayloadWithSinglePaddingChar_ShouldReturnCorrectExpiry()
+    {
+        // Arrange (Given)
+        // payload {"sub":"xx","exp":9999999999} encodes to b64url with remainder 3 (needs one '=' padding)
+        const string token =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ4eCIsImV4cCI6OTk5OTk5OTk5OX0.sig";
+        var sut = new TokenStore(token);
+
+        // Act (When)
+        var expiry = sut.GetExpiry();
+
+        // Assert (Then)
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(9999999999), expiry);
+    }
+
+    [Fact]
+    public void Dispose_ShouldNotThrowOnSubsequentDispose()
+    {
+        // Arrange (Given)
+        var token = BuildJwt(DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds());
+        var sut = new TokenStore(token);
+        sut.Dispose();
+
+        // Act (When) / Assert (Then)
+        var ex = Record.Exception(() => sut.Dispose());
+        Assert.Null(ex);
+    }
 }
