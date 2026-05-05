@@ -35,8 +35,6 @@ await using var admin = AdminClient.Create(HttpAddress, clientOptions);
 Console.WriteLine($"[setup] Configuring topic '{Topic}' (MaxRetries=2)...");
 await admin.UpsertTopicConfigAsync(Topic, new TopicConfig(Topic, Replayable: false, MaxRetries: 2), cts.Token);
 
-// Register the main consumer group; DLQ group is registered after consuming
-// because the DLQ topic may not exist until the first message is dead-lettered.
 await RegisterGroupAsync(admin, Topic, ConsumerGroup, cts.Token);
 
 // Publish 5 orders — order #3 is a poison pill
@@ -44,28 +42,17 @@ Console.WriteLine("\n[producer] Publishing 5 orders...");
 var producer = client.NewProducer();
 await PublishOrdersAsync(producer, Topic, cts.Token);
 
-// Stream-consume with concurrency=3; handler throws on poison → auto-nack
-Console.WriteLine("\n[consumer] Consuming orders (Ctrl+C to stop)...");
-var consumer = client.NewConsumer(Topic, new ConsumerOptions
+// Run the main consumer and DLQ monitor concurrently (Ctrl+C stops both)
+Console.WriteLine("\n[consumer] Starting order consumer and DLQ monitor (Ctrl+C to stop)...");
+var mainConsumer = client.NewConsumer(Topic, new ConsumerOptions
 {
     ConsumerGroup = ConsumerGroup,
     Concurrency = 3,
 });
-await consumer.ConsumeAsync(HandleOrderAsync, cts.Token);
 
-// Register the DLQ consumer group and drain — the topic only exists once at
-// least one message has exhausted its retries, so skip silently if not yet.
-Console.WriteLine("\n[dlq] Draining DLQ...");
-try
-{
-    await RegisterGroupAsync(admin, DlqTopic, DlqConsumerGroup, CancellationToken.None);
-    var dlqConsumer = client.NewConsumer(DlqTopic, new ConsumerOptions { ConsumerGroup = DlqConsumerGroup });
-    await DrainDlqAsync(dlqConsumer);
-}
-catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.InternalServerError)
-{
-    Console.WriteLine("[dlq] Skipping drain — DLQ topic not available yet (no messages dead-lettered).");
-}
+await Task.WhenAll(
+    mainConsumer.ConsumeAsync(HandleOrderAsync, cts.Token),
+    RunDlqLoopAsync(admin, client, DlqTopic, DlqConsumerGroup, cts.Token));
 
 Console.WriteLine("\nDone.");
 
@@ -131,24 +118,68 @@ static async Task HandleOrderAsync(QueueTiMessage msg, CancellationToken ct)
     await Task.Delay(100, ct);
 }
 
-static async Task DrainDlqAsync(Consumer dlqConsumer)
+static async Task RunDlqLoopAsync(
+    AdminClient admin, QueueTiClient client,
+    string dlqTopic, string dlqGroup, CancellationToken ct)
 {
-    // Start with a 10 s window; tighten to 2 s after the first batch lands so
-    // we don't time out before the server delivers dead-lettered messages.
-    using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    // The DLQ topic is only created server-side once a message exhausts its retries,
+    // so poll for registration until it exists or shutdown is requested.
+    Console.WriteLine("[dlq]  Waiting for DLQ topic to be created...");
+    while (!ct.IsCancellationRequested)
+    {
+        try
+        {
+            await RegisterGroupAsync(admin, dlqTopic, dlqGroup, ct);
+            break;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.InternalServerError)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    if (ct.IsCancellationRequested)
+    {
+        return;
+    }
+
+    var dlqConsumer = client.NewConsumer(dlqTopic, new ConsumerOptions { ConsumerGroup = dlqGroup });
     var count = 0;
 
-    await dlqConsumer.ConsumeBatchAsync(10, async (batch, ct) =>
+    Console.WriteLine("[dlq]  Monitoring for dead-lettered messages...");
+    while (!ct.IsCancellationRequested)
     {
-        foreach (var msg in batch)
+        using var batchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        batchCts.CancelAfter(TimeSpan.FromSeconds(5));
+        try
         {
-            var orderId = msg.Metadata.GetValueOrDefault("order-id", msg.Id);
-            Console.WriteLine($"[dlq]      ACK  {orderId} (retries: {msg.RetryCount})");
-            await msg.AckAsync(ct);
-            Interlocked.Increment(ref count);
+            await dlqConsumer.ConsumeBatchAsync(10, async (batch, bct) =>
+            {
+                foreach (var msg in batch)
+                {
+                    var orderId = msg.Metadata.GetValueOrDefault("order-id", msg.Id);
+                    Console.WriteLine($"[dlq]  ACK  {orderId} (retries: {msg.RetryCount})");
+                    await msg.AckAsync(bct);
+                    Interlocked.Increment(ref count);
+                }
+            }, batchCts.Token);
         }
-        drainCts.CancelAfter(TimeSpan.FromSeconds(2));
-    }, drainCts.Token);
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // batch window expired, poll again
+        }
+    }
 
-    Console.WriteLine($"[dlq] Drain complete — {count} dead-lettered message(s) acked.");
+    Console.WriteLine($"[dlq]  Monitor stopped — {count} dead-lettered message(s) processed.");
 }
