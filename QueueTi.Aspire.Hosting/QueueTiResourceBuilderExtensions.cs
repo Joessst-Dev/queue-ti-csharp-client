@@ -86,6 +86,51 @@ public static class QueueTiResourceBuilderExtensions
             });
     }
 
+    public static IResourceBuilder<QueueTiResource> WithRedis<T>(
+        this IResourceBuilder<QueueTiResource> builder,
+        IResourceBuilder<T> redis)
+        where T : IResourceWithConnectionString
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(redis);
+
+        // IResourceBuilder<T> is declared covariant (out T), so this cast is safe
+        return builder
+            .WaitFor((IResourceBuilder<IResource>)redis)
+            .WithEnvironment(async context =>
+            {
+                var connectionString = await redis.Resource.ConnectionStringExpression.GetValueAsync(context.CancellationToken)
+                    ?? throw new DistributedApplicationException(
+                        $"Could not resolve connection string for Redis resource '{redis.Resource.Name}'.");
+
+                // Parse StackExchange.Redis format: host:port[,option=value,...]
+                var firstSegment = connectionString.Split(',')[0];
+                var colonIdx = firstSegment.LastIndexOf(':');
+                var host = colonIdx >= 0 ? firstSegment[..colonIdx] : firstSegment;
+                var port = colonIdx >= 0 ? firstSegment[(colonIdx + 1)..] : "6379";
+
+                var options = connectionString
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Skip(1)
+                    .Select(o => o.Split('=', 2))
+                    .Where(o => o.Length == 2)
+                    .ToDictionary(o => o[0].Trim().ToLowerInvariant(), o => o[1].Trim());
+
+                context.EnvironmentVariables[QueueTiResource.RedisHostEnv] = host;
+                context.EnvironmentVariables[QueueTiResource.RedisPortEnv] = port;
+
+                if (options.TryGetValue("password", out var password))
+                {
+                    context.EnvironmentVariables[QueueTiResource.RedisPasswordEnv] = password;
+                }
+
+                if (options.TryGetValue("ssl", out var ssl) && ssl.Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.EnvironmentVariables[QueueTiResource.RedisTlsEnabledEnv] = "true";
+                }
+            });
+    }
+
     public static IResourceBuilder<QueueTiResource> WithAuthentication(
         this IResourceBuilder<QueueTiResource> builder,
         string username,
