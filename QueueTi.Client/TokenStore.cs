@@ -46,7 +46,9 @@ public sealed class TokenStore : IDisposable
         var token = Get();
         var parts = token.Split('.');
         if (parts.Length != 3)
+        {
             throw new FormatException("JWT must have exactly three dot-separated segments.");
+        }
 
         var payload = parts[1];
 
@@ -72,10 +74,14 @@ public sealed class TokenStore : IDisposable
 
         using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(bytes));
         if (!doc.RootElement.TryGetProperty("exp", out var expElement))
+        {
             throw new FormatException("JWT payload does not contain an 'exp' claim.");
+        }
 
         if (!expElement.TryGetInt64(out var expSeconds))
+        {
             throw new FormatException("JWT 'exp' claim is not a valid integer.");
+        }
 
         return DateTimeOffset.FromUnixTimeSeconds(expSeconds);
     }

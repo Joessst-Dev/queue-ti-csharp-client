@@ -55,9 +55,13 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
             MaxRetries = 3
         };
         foreach (var (k, v) in request.Metadata)
+        {
             stored.Metadata[k] = v;
+        }
         if (request.HasKey)
+        {
             stored.Key = request.Key;
+        }
 
         _dequeueQueue.Enqueue(stored);
 
@@ -71,11 +75,23 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
 
         while (_dequeueQueue.TryDequeue(out var msg))
         {
-            if (msg.Topic == request.Topic && found is null) found = msg;
-            else skipped.Add(msg);
-            if (found is not null) break;
+            if (msg.Topic == request.Topic && found is null)
+            {
+                found = msg;
+            }
+            else
+            {
+                skipped.Add(msg);
+            }
+            if (found is not null)
+            {
+                break;
+            }
         }
-        foreach (var msg in skipped) _dequeueQueue.Enqueue(msg);
+        foreach (var msg in skipped)
+        {
+            _dequeueQueue.Enqueue(msg);
+        }
         return Task.FromResult(found ?? new DequeueResponse());
     }
 
@@ -89,10 +105,20 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
 
         while (taken < request.Count && _dequeueQueue.TryDequeue(out var msg))
         {
-            if (msg.Topic == request.Topic) { response.Messages.Add(msg); taken++; }
-            else skipped.Add(msg);
+            if (msg.Topic == request.Topic)
+            {
+                response.Messages.Add(msg);
+                taken++;
+            }
+            else
+            {
+                skipped.Add(msg);
+            }
         }
-        foreach (var msg in skipped) _dequeueQueue.Enqueue(msg);
+        foreach (var msg in skipped)
+        {
+            _dequeueQueue.Enqueue(msg);
+        }
         return Task.FromResult(response);
     }
 
@@ -106,7 +132,9 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
     public override Task<NackResponse> Nack(NackRequest request, ServerCallContext context)
     {
         if (_nackFaults.TryDequeue(out var fault))
+        {
             throw fault;
+        }
 
         _nackedMessages.Add((request.Id, request.Error));
         _nackSignal.Release();
@@ -122,7 +150,9 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
         LastSubscribeHeaders = context.RequestHeaders;
 
         if (_subscribeFaults.TryDequeue(out var fault))
+        {
             throw new RpcException(new Status(fault.code, fault.detail));
+        }
 
         var channel = _subscribeChannels.GetOrAdd(request.Topic,
             _ => Channel.CreateUnbounded<SubscribeResponse>());
@@ -148,8 +178,12 @@ public sealed class QueueServiceFake : QueueService.QueueServiceBase
         };
 
         if (metadata is not null)
+        {
             foreach (var (k, v) in metadata)
+            {
                 response.Metadata[k] = v;
+            }
+        }
 
         await channel.Writer.WriteAsync(response);
     }

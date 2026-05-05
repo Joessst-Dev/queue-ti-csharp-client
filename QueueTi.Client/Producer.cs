@@ -28,11 +28,17 @@ public sealed class Producer
         };
 
         if (opts?.Metadata is { } metadata)
+        {
             foreach (var (k, v) in metadata)
+            {
                 request.Metadata[k] = v;
+            }
+        }
 
         if (opts?.Key is { } key)
+        {
             request.Key = key;
+        }
 
         var response = await _grpcClient.EnqueueAsync(request, cancellationToken: ct);
         return response.Id;
