@@ -65,7 +65,9 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
         var channelOptions = new GrpcChannelOptions();
 
         if (options.Insecure)
+        {
             channelOptions.Credentials = Grpc.Core.ChannelCredentials.Insecure;
+        }
 
         options.ConfigureChannel?.Invoke(channelOptions);
 
@@ -98,8 +100,10 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
     public void SetToken(string token)
     {
         if (_tokenStore is null)
+        {
             throw new InvalidOperationException(
                 "Cannot set token: no TokenStore is configured. Provide a BearerToken in QueueTiClientOptions.");
+        }
 
         _tokenStore.Set(token);
     }
@@ -116,7 +120,9 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
                 var delay = expiry - DateTimeOffset.UtcNow - _refreshLeadTime;
 
                 if (delay > TimeSpan.Zero)
+                {
                     await Task.Delay(delay, ct);
+                }
 
                 var newToken = await _options.TokenRefresher!(ct);
                 _tokenStore.Set(newToken);
@@ -147,7 +153,10 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
 
         _refreshCts.Cancel();
         try { _refreshTask.GetAwaiter().GetResult(); } catch { }
@@ -164,7 +173,10 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
 
         await _refreshCts.CancelAsync();
         try { await _refreshTask; } catch { }

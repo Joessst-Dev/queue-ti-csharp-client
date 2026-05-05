@@ -49,7 +49,9 @@ public sealed class Consumer
                 };
 
                 if (_options.VisibilityTimeoutSeconds.HasValue)
+                {
                     request.VisibilityTimeoutSeconds = _options.VisibilityTimeoutSeconds.Value;
+                }
 
                 using var stream = _grpcClient.Subscribe(request, cancellationToken: ct);
 
@@ -135,7 +137,9 @@ public sealed class Consumer
                 };
 
                 if (_options.VisibilityTimeoutSeconds.HasValue)
+                {
                     request.VisibilityTimeoutSeconds = _options.VisibilityTimeoutSeconds.Value;
+                }
 
                 var response = await _grpcClient.BatchDequeueAsync(request, cancellationToken: ct);
 
