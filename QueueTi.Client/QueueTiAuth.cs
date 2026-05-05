@@ -72,6 +72,14 @@ public static class QueueTiAuth
             handler.ServerCertificateCustomValidationCallback =
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
-        return new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+        try
+        {
+            return new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+        }
+        catch
+        {
+            handler.Dispose();
+            throw;
+        }
     }
 }
