@@ -1,15 +1,20 @@
 # QueueTi C# Client
 
+[![NuGet](https://img.shields.io/nuget/v/QueueTi.Client)](https://www.nuget.org/packages/QueueTi.Client)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A proto-first gRPC client library for the [QueueTi](https://github.com/Joessst-Dev/queue-ti) distributed message queue service. Targets `.NET 10.0`.
 
 ## Installation
 
-> **Note:** The package has not yet been published to NuGet. To use it now, clone the repository and add a project reference, or build the package locally with `dotnet pack QueueTi.Client/`.
-
-Once published, it will be installable via:
-
 ```bash
 dotnet add package QueueTi.Client
+```
+
+Or with the Package Manager:
+
+```powershell
+Install-Package QueueTi.Client
 ```
 
 ## Quick Start
