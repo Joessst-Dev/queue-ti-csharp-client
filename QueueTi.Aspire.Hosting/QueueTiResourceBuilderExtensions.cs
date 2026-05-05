@@ -45,16 +45,14 @@ public static class QueueTiResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(database);
 
+        // IResourceBuilder<T> is declared covariant (out T), so this cast is safe
         return builder
             .WaitFor((IResourceBuilder<IResource>)database)
             .WithEnvironment(async context =>
             {
-                var connectionString = await database.Resource.ConnectionStringExpression.GetValueAsync(context.CancellationToken);
-
-                if (connectionString is null)
-                {
-                    return;
-                }
+                var connectionString = await database.Resource.ConnectionStringExpression.GetValueAsync(context.CancellationToken)
+                    ?? throw new DistributedApplicationException(
+                        $"Could not resolve connection string for database resource '{database.Resource.Name}'.");
 
                 // Parse host, port, username, password, dbname from Npgsql semicolon-delimited connection string
                 var parts = connectionString
@@ -100,10 +98,10 @@ public static class QueueTiResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(jwtSecret);
 
         return builder
-            .WithEnvironment("QUEUETI_AUTH_ENABLED", "true")
-            .WithEnvironment("QUEUETI_AUTH_USERNAME", username)
-            .WithEnvironment("QUEUETI_AUTH_PASSWORD", password)
-            .WithEnvironment("QUEUETI_AUTH_JWT_SECRET", jwtSecret);
+            .WithEnvironment(QueueTiResource.AuthEnabledEnv, "true")
+            .WithEnvironment(QueueTiResource.AuthUsernameEnv, username)
+            .WithEnvironment(QueueTiResource.AuthPasswordEnv, password)
+            .WithEnvironment(QueueTiResource.AuthJwtSecretEnv, jwtSecret);
     }
 
     public static IResourceBuilder<QueueTiResource> WithLogLevel(

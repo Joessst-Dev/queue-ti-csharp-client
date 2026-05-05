@@ -4,7 +4,10 @@ namespace QueueTi.Aspire;
 
 internal sealed class QueueTiHealthCheck : IHealthCheck
 {
-    private static readonly HttpClient _http = new();
+    private static readonly HttpClient _http = new(new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+    });
     private readonly Uri _healthUrl;
 
     public QueueTiHealthCheck(Uri healthUrl)

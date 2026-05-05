@@ -11,6 +11,7 @@ namespace QueueTi.Aspire;
 public static class AspireQueueTiClientExtensions
 {
     private const string DefaultConfigSectionName = "QueueTi";
+    private const int DefaultHttpPort = 8080;
 
     public static void AddQueueTiClient(
         this IHostApplicationBuilder builder,
@@ -70,7 +71,7 @@ public static class AspireQueueTiClientExtensions
     {
         if (Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
         {
-            return new Uri($"{uri.Scheme}://{uri.Host}:8080/healthz");
+            return new Uri($"{uri.Scheme}://{uri.Host}:{DefaultHttpPort}/healthz");
         }
 
         return new Uri("http://localhost:8080/healthz");

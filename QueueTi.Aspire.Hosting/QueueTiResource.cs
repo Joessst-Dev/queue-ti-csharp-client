@@ -16,6 +16,11 @@ public sealed class QueueTiResource : ContainerResource, IResourceWithConnection
     internal const string ServerPortEnv = "QUEUETI_SERVER_PORT";
     internal const string HttpPortEnv = "QUEUETI_SERVER_HTTP_PORT";
 
+    internal const string AuthEnabledEnv = "QUEUETI_AUTH_ENABLED";
+    internal const string AuthUsernameEnv = "QUEUETI_AUTH_USERNAME";
+    internal const string AuthPasswordEnv = "QUEUETI_AUTH_PASSWORD";
+    internal const string AuthJwtSecretEnv = "QUEUETI_AUTH_JWT_SECRET";
+
     public QueueTiResource(string name) : base(name)
     {
     }
