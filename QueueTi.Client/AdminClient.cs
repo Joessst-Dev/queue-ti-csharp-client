@@ -91,14 +91,29 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         }
 
         using var http = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+        return await LoginAsync(http, username, password, ct);
+    }
+
+    internal static async Task<string> LoginAsync(
+        HttpClient http,
+        string username,
+        string password,
+        CancellationToken ct = default)
+    {
         var body = new { username, password };
         using var response = await http.PostAsJsonAsync("/auth/login", body, ct);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
         using var doc = System.Text.Json.JsonDocument.Parse(json);
-        return doc.RootElement.GetProperty("access_token").GetString()
-            ?? throw new InvalidOperationException("Login response did not contain 'access_token'.");
+
+        if (!doc.RootElement.TryGetProperty("access_token", out var prop))
+        {
+            throw new InvalidOperationException("Login response did not contain 'access_token'.");
+        }
+
+        return prop.GetString()
+            ?? throw new InvalidOperationException("'access_token' in login response was null.");
     }
 
     private static HttpClientHandler BuildHttpClientHandler(QueueTiClientOptions options)

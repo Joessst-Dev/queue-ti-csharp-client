@@ -452,4 +452,85 @@ public sealed class AdminClientTests
         await host.StopAsync();
         host.Dispose();
     }
+
+    [Fact]
+    public async Task LoginAsync_GivenValidCredentials_ShouldReturnAccessToken()
+    {
+        // Arrange (Given)
+        string? capturedUsername = null;
+        string? capturedPassword = null;
+
+        var (_, host) = await BuildAsync(ep =>
+        {
+            ep.MapPost("/auth/login", async ctx =>
+            {
+                using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
+                capturedUsername = doc.RootElement.GetProperty("username").GetString();
+                capturedPassword = doc.RootElement.GetProperty("password").GetString();
+
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"access_token":"test-jwt-token"}""");
+            });
+        });
+
+        var http = host.GetTestServer().CreateClient();
+
+        // Act (When)
+        var token = await AdminClient.LoginAsync(http, "admin", "secret");
+
+        // Assert (Then)
+        Assert.Equal("test-jwt-token", token);
+        Assert.Equal("admin", capturedUsername);
+        Assert.Equal("secret", capturedPassword);
+
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    [Fact]
+    public async Task LoginAsync_GivenUnauthorizedResponse_ShouldThrow()
+    {
+        // Arrange (Given)
+        var (_, host) = await BuildAsync(ep =>
+        {
+            ep.MapPost("/auth/login", ctx =>
+            {
+                ctx.Response.StatusCode = 401;
+                return Task.CompletedTask;
+            });
+        });
+
+        var http = host.GetTestServer().CreateClient();
+
+        // Act & Assert (When & Then)
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => AdminClient.LoginAsync(http, "admin", "wrong"));
+
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    [Fact]
+    public async Task LoginAsync_GivenResponseWithoutAccessToken_ShouldThrowInvalidOperationException()
+    {
+        // Arrange (Given)
+        var (_, host) = await BuildAsync(ep =>
+        {
+            ep.MapPost("/auth/login", async ctx =>
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"token":"unexpected-field"}""");
+            });
+        });
+
+        var http = host.GetTestServer().CreateClient();
+
+        // Act & Assert (When & Then)
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AdminClient.LoginAsync(http, "admin", "admin"));
+        Assert.Contains("access_token", ex.Message);
+
+        await host.StopAsync();
+        host.Dispose();
+    }
 }
