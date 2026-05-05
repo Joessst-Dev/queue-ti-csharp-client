@@ -54,13 +54,11 @@ jobs:
         run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Pack
-        run: >
-          dotnet pack QueueTi.Client/
-          --configuration Release
-          --no-build
-          --no-restore
-          -p:Version=${{ steps.version.outputs.value }}
-          --output ./nupkg
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          dotnet pack QueueTi.Client/ --configuration Release --no-build --no-restore -p:Version=$VERSION --output ./nupkg
+          dotnet pack QueueTi.Aspire.Hosting/ --configuration Release --no-build --no-restore -p:Version=$VERSION --output ./nupkg
+          dotnet pack QueueTi.Client.Aspire/ --configuration Release --no-build --no-restore -p:Version=$VERSION --output ./nupkg
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v7
