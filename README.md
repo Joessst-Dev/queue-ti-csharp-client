@@ -126,6 +126,8 @@ app.MapPost("/orders", async (QueueTiClient client) =>
 });
 ```
 
+When `Insecure = true`, the DI path configures the gRPC channel to use plaintext HTTP credentials automatically through the `AddGrpcClient` code path.
+
 ## .NET Aspire Integration
 
 The `QueueTi.Aspire.Hosting` and `QueueTi.Client.Aspire` packages provide seamless integration with .NET Aspire orchestration for both AppHost and service projects.
@@ -168,18 +170,21 @@ var queue = builder.AddQueueTi("queue")
     .WithLogLevel("info");
 
 builder.AddProject<Projects.MyWorker>("worker")
-    .WithReference(queue);
+    .WithReference(queue)
+    .WithEnvironment("QueueTi__queue__HttpUrl", queue.GetEndpoint("http"));
 
 builder.Build().Run();
 ```
+
+> **Note:** When using Postgres, generate passwords with only alphanumeric characters (`GenerateParameterDefault { Special = false }`) to avoid URL encoding issues in the QueueTi server's internal `postgres://` URL construction.
 
 **Key builder methods:**
 
 | Method | Purpose |
 |--------|---------|
 | `AddQueueTi(name, grpcPort?, httpPort?, tag?)` | Adds a QueueTi container resource. Pulls `ghcr.io/joessst-dev/queue-ti`. Endpoints: `grpc` (target 50051), `http` (target 8080). |
-| `WithNpgsqlDatabase(database)` | Wires an Npgsql database resource. Sets `QUEUETI_DB_*` env vars and adds `WaitFor` dependency. |
-| `WithRedis(redis)` | Wires an optional Redis resource for rate limiting. Sets `QUEUETI_REDIS_*` env vars and adds `WaitFor` dependency. |
+| `WithNpgsqlDatabase(database)` | Wires an Npgsql database resource. Automatically detects container-to-container networking and uses the Docker DNS alias + internal target port. Parses the connection string to extract credentials. Sets `QUEUETI_DB_*` env vars and adds `WaitFor` dependency. Throws `DistributedApplicationException` if the connection string cannot be parsed. |
+| `WithRedis(redis)` | Wires an optional Redis resource for rate limiting. Uses container-to-container addressing when possible (Docker DNS alias + internal target port). Sets `QUEUETI_REDIS_*` env vars and adds `WaitFor` dependency. |
 | `WithReplicas(n)` | Runs `n` instances of QueueTi. All replicas share the same database and Redis resources. |
 | `WithAuthentication(username, password, jwtSecret)` | Configures authentication. Sets `QUEUETI_AUTH_ENABLED` and related env vars from `ParameterResource` values. |
 | `WithLogLevel(level)` | Sets `QUEUETI_LOG_LEVEL`. |
@@ -214,7 +219,7 @@ app.Run();
 The client automatically:
 - Reads the connection string from `ConnectionStrings:queue` (set by Aspire).
 - Registers `QueueTiClient` in DI (and the underlying `QueueService.QueueServiceClient`).
-- Configures health checks (HTTP GET to `/healthz` on port 8080).
+- Configures health checks (if `HttpUrl` is set; see Health Checks section below).
 - Instruments outbound gRPC calls with OpenTelemetry tracing.
 
 **With custom settings:**
@@ -232,6 +237,7 @@ builder.AddQueueTiClient("queue", settings =>
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `ConnectionString` | `string?` | `null` | Explicit connection string. If not set, read from `ConnectionStrings:{connectionName}` or `QueueTi:{connectionName}` config. |
+| `HttpUrl` | `string?` | `null` | HTTP endpoint of the QueueTi service. Required to enable health checks. Set via `QueueTi:{connectionName}:HttpUrl` config or `QueueTi__{connectionName}__HttpUrl` environment variable. |
 | `DisableHealthChecks` | `bool` | `false` | Disable automatic health check registration. |
 | `DisableTracing` | `bool` | `false` | Disable OpenTelemetry instrumentation. |
 | `BearerToken` | `string?` | `null` | Optional bearer token for authentication. |
@@ -239,7 +245,24 @@ builder.AddQueueTiClient("queue", settings =>
 
 ### Health Checks
 
-When `DisableHealthChecks` is false (default), the integration registers an HTTP health check that probes `GET /healthz` on the QueueTi service's HTTP port (default 8080). The check is registered under tags `live` and `queueti` and requires no authentication.
+Health checks are only registered when `DisableHealthChecks` is false (default) **and** `HttpUrl` is explicitly set. The integration probes `GET /healthz` on the provided HTTP endpoint. The check is registered under tags `live` and `queueti` and requires no authentication.
+
+Set `HttpUrl` via configuration:
+
+```csharp
+builder.AddQueueTiClient("queue", settings =>
+{
+    settings.HttpUrl = "http://queue:8080";  // or via QueueTi:queue:HttpUrl config
+});
+```
+
+Or via environment variable when using Aspire:
+
+```csharp
+builder.AddProject<Projects.MyService>("service")
+    .WithReference(queue)
+    .WithEnvironment("QueueTi__queue__HttpUrl", queue.GetEndpoint("http"));
+```
 
 ### Distributed Tracing
 
@@ -275,6 +298,19 @@ string id = await producer.PublishAsync("orders", payload, new PublishOptions
 | `Metadata` | `IReadOnlyDictionary<string, string>?` | Arbitrary string key-value pairs attached to the message. |
 
 ## Consuming Messages
+
+### Consumer Group Registration
+
+QueueTi requires consumer groups to be explicitly registered before any messages can be delivered. Register a consumer group via the QueueTi HTTP API before calling `ConsumeAsync()` or `ConsumeBatchAsync()`:
+
+```csharp
+// Use a long-lived shared client or IHttpClientFactory in production
+var response = await _httpClient.PostAsync(
+    "http://queue:8080/api/topics/orders/consumer-groups",
+    JsonContent.Create(new { consumer_group = "billing" }));
+```
+
+The endpoint returns `201 Created` on success. See the samples below for an example of robust group registration with retry logic.
 
 ### Streaming consumer (real-time processing)
 
@@ -468,6 +504,36 @@ In batch mode, exceptions are your responsibility to handle. Ack or nack each me
 ### Token refresh failures
 
 Token refresh failures are logged and retried with exponential backoff. If refresh fails repeatedly, the client continues operating with the last valid token until the connection fails.
+
+## Samples
+
+Three complete sample projects are included in the `samples/` directory:
+
+**`QueueTi.Samples.AppHost`** — Aspire orchestration project that defines the distributed application:
+- Adds Postgres and Redis containers with environment-safe passwords (alphanumeric-only for URL safety).
+- Registers a QueueTi container resource and wires it to Postgres and Redis.
+- Producer and consumer services reference the queue resource and wait for it to be healthy before starting.
+- Injects the HTTP URL (`QueueTi__queue__HttpUrl`) into both services so health checks and consumer group registration work correctly.
+
+**`QueueTi.Samples.Producer`** — ASP.NET Core minimal API service:
+- `POST /publish/{topic}` — Accepts `{"message": "...", "metadata": {...}}` and publishes to the topic, returning `{"id": "..."}`.
+- `GET /health` — Aspire health check endpoint.
+- Uses `AddQueueTiClient("queue")` from the Aspire integration.
+
+**`QueueTi.Samples.Consumer`** — Worker Service:
+- On startup, registers the consumer group via `POST /api/topics/{topic}/consumer-groups` with exponential backoff retry (up to 30 seconds) until success.
+- Opens a `Subscribe` stream using `ConsumeAsync()` and logs each received message.
+- Topic and consumer group configurable via `Consumer:Topic` and `Consumer:Group` environment variables.
+- Uses `AddQueueTiClient("queue")` from the Aspire integration.
+
+To run the samples:
+
+```bash
+cd samples/QueueTi.Samples.AppHost
+dotnet run
+```
+
+The AppHost orchestrates Postgres, Redis, and QueueTi containers locally, then runs the producer and consumer services.
 
 ## Thread Safety
 

@@ -3,6 +3,7 @@ namespace QueueTi.Aspire;
 public sealed class QueueTiClientSettings
 {
     public string? ConnectionString { get; set; }
+    public string? HttpUrl { get; set; }
     public bool DisableHealthChecks { get; set; }
     public bool DisableTracing { get; set; }
     public string? BearerToken { get; set; }

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="QueueTi.Samples.AppHost/QueueTi.Samples.AppHost.csproj" />
+  <Project Path="QueueTi.Samples.Producer/QueueTi.Samples.Producer.csproj" />
+  <Project Path="QueueTi.Samples.Consumer/QueueTi.Samples.Consumer.csproj" />
+</Solution>
