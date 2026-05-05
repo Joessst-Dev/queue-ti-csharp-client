@@ -21,7 +21,7 @@ string? bearerToken = null;
 if (await QueueTiAuth.GetAuthRequiredAsync(HttpAddress, insecure: true, cts.Token))
 {
     var username = Environment.GetEnvironmentVariable("QUEUETI_USERNAME") ?? "admin";
-    var password = Environment.GetEnvironmentVariable("QUEUETI_PASSWORD") ?? "admin";
+    var password = Environment.GetEnvironmentVariable("QUEUETI_PASSWORD") ?? "secret";
     Console.WriteLine("[setup] Auth enabled — logging in...");
     bearerToken = await QueueTiAuth.LoginAsync(HttpAddress, username, password, insecure: true, cts.Token);
 }
