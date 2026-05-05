@@ -21,6 +21,11 @@ public sealed class QueueTiResource : ContainerResource, IResourceWithConnection
     internal const string AuthPasswordEnv = "QUEUETI_AUTH_PASSWORD";
     internal const string AuthJwtSecretEnv = "QUEUETI_AUTH_JWT_SECRET";
 
+    internal const string RedisHostEnv = "QUEUETI_REDIS_HOST";
+    internal const string RedisPortEnv = "QUEUETI_REDIS_PORT";
+    internal const string RedisPasswordEnv = "QUEUETI_REDIS_PASSWORD";
+    internal const string RedisTlsEnabledEnv = "QUEUETI_REDIS_TLS_ENABLED";
+
     public QueueTiResource(string name) : base(name)
     {
     }
