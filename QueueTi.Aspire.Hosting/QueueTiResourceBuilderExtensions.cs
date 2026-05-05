@@ -5,7 +5,6 @@ namespace Aspire.Hosting.QueueTi;
 public static class QueueTiResourceBuilderExtensions
 {
     private const string ContainerImage = "ghcr.io/joessst-dev/queue-ti";
-    private const string ContainerTag = "latest";
     private const int DefaultGrpcPort = 50051;
     private const int DefaultHttpPort = 8080;
 
@@ -13,7 +12,8 @@ public static class QueueTiResourceBuilderExtensions
         this IDistributedApplicationBuilder builder,
         string name,
         int? grpcPort = null,
-        int? httpPort = null)
+        int? httpPort = null,
+        string tag = "latest")
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -22,8 +22,7 @@ public static class QueueTiResourceBuilderExtensions
 
         return builder
             .AddResource(resource)
-            .WithImage(ContainerImage, ContainerTag)
-            .WithImageRegistry("ghcr.io")
+            .WithImage(ContainerImage, tag)
             .WithEndpoint(
                 targetPort: DefaultGrpcPort,
                 port: grpcPort,
@@ -38,7 +37,7 @@ public static class QueueTiResourceBuilderExtensions
             .WithEnvironment(QueueTiResource.HttpPortEnv, DefaultHttpPort.ToString());
     }
 
-    public static IResourceBuilder<QueueTiResource> WithDatabase<T>(
+    public static IResourceBuilder<QueueTiResource> WithNpgsqlDatabase<T>(
         this IResourceBuilder<QueueTiResource> builder,
         IResourceBuilder<T> database)
         where T : IResourceWithConnectionString
@@ -47,6 +46,7 @@ public static class QueueTiResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(database);
 
         return builder
+            .WaitFor((IResourceBuilder<IResource>)database)
             .WithEnvironment(async context =>
             {
                 var connectionString = await database.Resource.ConnectionStringExpression.GetValueAsync(context.CancellationToken);
@@ -56,7 +56,7 @@ public static class QueueTiResourceBuilderExtensions
                     return;
                 }
 
-                // Parse host, port, username, password, dbname from connection string
+                // Parse host, port, username, password, dbname from Npgsql semicolon-delimited connection string
                 var parts = connectionString
                     .Split(';', StringSplitOptions.RemoveEmptyEntries)
                     .Select(p => p.Split('=', 2))

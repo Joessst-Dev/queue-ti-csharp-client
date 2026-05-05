@@ -2,6 +2,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
 using QueueTi.Extensions;
 
 namespace QueueTi.Aspire;
@@ -48,13 +50,29 @@ public static class AspireQueueTiClientExtensions
 
         if (!settings.DisableHealthChecks)
         {
+            var healthUrl = BuildHealthUrl(settings.ConnectionString);
             builder.Services.AddHealthChecks()
                 .Add(new HealthCheckRegistration(
                     $"QueueTi_{connectionName}",
-                    sp => new QueueTiHealthCheck(
-                        sp.GetRequiredService<global::QueueTi.Pb.QueueService.QueueServiceClient>()),
+                    _ => new QueueTiHealthCheck(healthUrl),
                     failureStatus: HealthStatus.Unhealthy,
                     tags: ["live", "queueti"]));
         }
+
+        if (!settings.DisableTracing)
+        {
+            builder.Services.AddOpenTelemetry()
+                .WithTracing(tracing => tracing.AddGrpcClientInstrumentation());
+        }
+    }
+
+    private static Uri BuildHealthUrl(string connectionString)
+    {
+        if (Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
+        {
+            return new Uri($"{uri.Scheme}://{uri.Host}:8080/healthz");
+        }
+
+        return new Uri("http://localhost:8080/healthz");
     }
 }
