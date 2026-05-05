@@ -142,23 +142,15 @@ builder.Services.AddQueueTiAdminClient("http://queue.example.com", opts =>
 });
 
 // Inject AdminClient into your services
-app.MapPost("/admin/topics", async (AdminClient admin, RegisterTopicRequest req) =>
+app.MapPost("/admin/topics/{topic}", async (AdminClient admin, string topic) =>
 {
-    var config = new TopicConfig(
-        Topic: req.TopicName,
-        Replayable: req.Replayable,
-        MaxRetries: 3,
-        MessageTtlSeconds: 86400,
-        MaxDepth: 10000,
-        ReplayWindowSeconds: null,
-        ThroughputLimit: null
-    );
-    await admin.UpsertTopicConfigAsync(req.TopicName, config);
-    return Results.Created($"/admin/topics/{req.TopicName}", config);
+    var config = new TopicConfig(Topic: topic, Replayable: true, MaxRetries: 3);
+    await admin.UpsertTopicConfigAsync(topic, config);
+    return Results.Created($"/admin/topics/{topic}", config);
 });
 ```
 
-`AddQueueTiAdminClient()` uses `IHttpClientFactory` internally. Both `BearerToken`, `TokenRefresher`, and `Insecure` options apply the same way as for `QueueTiClient`.
+`AddQueueTiAdminClient()` uses `IHttpClientFactory` internally. The `BearerToken`, `TokenRefresher`, and `Insecure` options all apply the same way as for `QueueTiClient`.
 
 ## .NET Aspire Integration
 
@@ -251,8 +243,7 @@ app.Run();
 The client automatically:
 - Reads the connection string from `ConnectionStrings:queue` (set by Aspire).
 - Registers `QueueTiClient` in DI (and the underlying `QueueService.QueueServiceClient`).
-- If `QueueTiClientSettings.HttpUrl` is set, also registers `AdminClient` in DI.
-- Configures health checks (if `HttpUrl` is set; see Health Checks section below).
+- If `QueueTiClientSettings.HttpUrl` is set, also registers `AdminClient` in DI and configures health checks (see Health Checks section below).
 - Instruments outbound gRPC calls with OpenTelemetry tracing.
 
 **With custom settings:**
@@ -466,7 +457,7 @@ var admin = AdminClient.Create(
 );
 ```
 
-Or inject via dependency injection (see "Dependency Injection" section below).
+Or inject via dependency injection (see "Dependency Injection" section above).
 
 For manual HTTP client management (e.g., with `IHttpClientFactory`), use the constructor directly:
 
@@ -474,11 +465,7 @@ For manual HTTP client management (e.g., with `IHttpClientFactory`), use the con
 var admin = new AdminClient(httpClient);
 ```
 
-When using the constructor, you are responsible for wiring authentication headers yourself. Use `SetToken()` to update the bearer token at runtime:
-
-```csharp
-admin.SetToken("new-jwt-token");  // updates Authorization header for subsequent requests
-```
+When using this constructor, you are responsible for wiring authentication headers yourself (for example via a `DelegatingHandler`). `SetToken()` is not available with this constructor — it requires a `TokenStore` configured through `AdminClient.Create` or `AddQueueTiAdminClient`.
 
 ### Topic Configuration
 
@@ -498,9 +485,7 @@ var created = await admin.UpsertTopicConfigAsync("orders", new TopicConfig(
     Replayable: true,
     MaxRetries: 3,
     MessageTtlSeconds: 86400,
-    MaxDepth: 10000,
-    ReplayWindowSeconds: null,
-    ThroughputLimit: null
+    MaxDepth: 10000
 ));
 
 // Delete a topic configuration
@@ -575,7 +560,6 @@ await admin.RegisterConsumerGroupAsync("orders", "billing");
 await admin.UnregisterConsumerGroupAsync("orders", "billing");
 ```
 
-Consumer groups must be registered before `ConsumeAsync()` or `ConsumeBatchAsync()` can deliver messages. This is an alternative to the HTTP API approach shown in the "Consuming Messages" section.
 
 ### Statistics
 
@@ -594,7 +578,7 @@ foreach (var topicStat in stats)
 | Property | Type | Description |
 |----------|------|-------------|
 | `Topic` | `string` | Topic name. |
-| `Status` | `string` | Status of the topic (e.g., "healthy", "degraded"). |
+| `Status` | `string` | Status of the topic as reported by the server. |
 | `Count` | `int` | Number of unacknowledged messages on this topic. |
 
 ### Error Handling
@@ -631,6 +615,8 @@ await admin.DisposeAsync();  // preferred
 // or
 admin.Dispose();
 ```
+
+When created via `AdminClient.Create`, the client owns the underlying `HttpClient` and disposes it on cleanup. When constructed with `new AdminClient(httpClient)` or resolved from DI via `AddQueueTiAdminClient`, the caller or the `IHttpClientFactory` owns the `HttpClient` — the client will not dispose it.
 
 ## Bearer Token Authentication
 
