@@ -72,6 +72,35 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         return new AdminClient(httpClient, options, store, ownsHttpClient: true, loggerFactory);
     }
 
+    public static async Task<string> LoginAsync(
+        string baseUrl,
+        string username,
+        string password,
+        bool insecure = false,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        ArgumentException.ThrowIfNullOrWhiteSpace(username);
+        ArgumentException.ThrowIfNullOrWhiteSpace(password);
+
+        var handler = new HttpClientHandler();
+        if (insecure)
+        {
+            handler.ServerCertificateCustomValidationCallback =
+                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        }
+
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+        var body = new { username, password };
+        using var response = await http.PostAsJsonAsync("/auth/login", body, ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("access_token").GetString()
+            ?? throw new InvalidOperationException("Login response did not contain 'access_token'.");
+    }
+
     private static HttpClientHandler BuildHttpClientHandler(QueueTiClientOptions options)
     {
         var handler = new HttpClientHandler();

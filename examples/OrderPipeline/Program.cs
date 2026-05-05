@@ -16,7 +16,13 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-var clientOptions = new QueueTiClientOptions { Insecure = true };
+var username = Environment.GetEnvironmentVariable("QUEUETI_USERNAME") ?? "admin";
+var password = Environment.GetEnvironmentVariable("QUEUETI_PASSWORD") ?? "admin";
+
+Console.WriteLine("[setup] Logging in...");
+var token = await AdminClient.LoginAsync(HttpAddress, username, password, insecure: true, cts.Token);
+
+var clientOptions = new QueueTiClientOptions { Insecure = true, BearerToken = token };
 
 await using var client = QueueTiClient.Create(GrpcAddress, clientOptions);
 await using var admin = AdminClient.Create(HttpAddress, clientOptions);
@@ -25,9 +31,8 @@ await using var admin = AdminClient.Create(HttpAddress, clientOptions);
 Console.WriteLine($"[setup] Configuring topic '{Topic}' (MaxRetries=2)...");
 await admin.UpsertTopicConfigAsync(Topic, new TopicConfig(Topic, Replayable: false, MaxRetries: 2), cts.Token);
 
-// Register the main consumer group up-front; DLQ group is registered after consuming
+// Register the main consumer group; DLQ group is registered after consuming
 // because the DLQ topic may not exist until the first message is dead-lettered.
-Console.WriteLine("[setup] Registering consumer group...");
 await RegisterGroupAsync(admin, Topic, ConsumerGroup, cts.Token);
 
 // Publish 5 orders — order #3 is a poison pill
