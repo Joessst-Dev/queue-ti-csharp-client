@@ -53,11 +53,19 @@ var consumer = client.NewConsumer(Topic, new ConsumerOptions
 });
 await consumer.ConsumeAsync(HandleOrderAsync, cts.Token);
 
-// Register the DLQ consumer group now that the topic exists, then drain
-Console.WriteLine("\n[dlq] Registering DLQ consumer group and draining...");
-await RegisterGroupAsync(admin, DlqTopic, DlqConsumerGroup, CancellationToken.None);
-var dlqConsumer = client.NewConsumer(DlqTopic, new ConsumerOptions { ConsumerGroup = DlqConsumerGroup });
-await DrainDlqAsync(dlqConsumer);
+// Register the DLQ consumer group and drain — the topic only exists once at
+// least one message has exhausted its retries, so skip silently if not yet.
+Console.WriteLine("\n[dlq] Draining DLQ...");
+try
+{
+    await RegisterGroupAsync(admin, DlqTopic, DlqConsumerGroup, CancellationToken.None);
+    var dlqConsumer = client.NewConsumer(DlqTopic, new ConsumerOptions { ConsumerGroup = DlqConsumerGroup });
+    await DrainDlqAsync(dlqConsumer);
+}
+catch (HttpRequestException ex)
+{
+    Console.WriteLine($"[dlq] Skipping drain — DLQ topic not available yet ({(int?)ex.StatusCode} {ex.StatusCode}).");
+}
 
 Console.WriteLine("\nDone.");
 
