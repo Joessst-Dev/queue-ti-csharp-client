@@ -48,6 +48,7 @@ var mainConsumer = client.NewConsumer(Topic, new ConsumerOptions
 {
     ConsumerGroup = ConsumerGroup,
     Concurrency = 3,
+    VisibilityTimeoutSeconds = 5,
 });
 
 await Task.WhenAll(
