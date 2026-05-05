@@ -29,13 +29,13 @@ internal sealed class MessageConsumerService : BackgroundService
             ConsumerGroup = group
         });
 
-        await consumer.ConsumeAsync(async (msg, ct) =>
+        await consumer.ConsumeAsync((msg, ct) =>
         {
             var text = Encoding.UTF8.GetString(msg.Payload);
             _logger.LogInformation(
                 "Message {Id} (retry {Retry}): {Payload}",
                 msg.Id, msg.RetryCount, text);
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }, stoppingToken);
     }
 }
