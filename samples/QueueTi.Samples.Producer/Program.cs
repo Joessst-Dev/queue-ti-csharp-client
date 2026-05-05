@@ -8,7 +8,7 @@ builder.AddQueueTiClient("queue");
 
 var app = builder.Build();
 
-app.MapPost("/messages/{topic}", async (string topic, PublishRequest request, QueueTiClient client) =>
+app.MapPost("/publish/{topic}", async (string topic, PublishRequest request, QueueTiClient client) =>
 {
     var producer = client.NewProducer();
     var payload = Encoding.UTF8.GetBytes(request.Message);
