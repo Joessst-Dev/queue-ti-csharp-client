@@ -11,7 +11,7 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
 {
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
@@ -183,7 +183,7 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(topic);
         ArgumentException.ThrowIfNullOrWhiteSpace(group);
 
-        var body = new { group };
+        var body = new { consumer_group = group };
         using var response = await _http.PostAsJsonAsync(
             $"/api/topics/{Uri.EscapeDataString(topic)}/consumer-groups", body, _jsonOptions, ct);
         await CheckResponseAsync(response);

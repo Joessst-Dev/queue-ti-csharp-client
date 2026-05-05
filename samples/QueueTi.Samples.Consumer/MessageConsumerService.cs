@@ -1,25 +1,23 @@
-using QueueTi;
-using System.Net;
-using System.Net.Http.Json;
 using System.Text;
+using QueueTi;
 
 internal sealed class MessageConsumerService : BackgroundService
 {
     private static readonly TimeSpan _maxRegistrationBackoff = TimeSpan.FromSeconds(30);
 
     private readonly QueueTiClient _client;
-    private readonly HttpClient _http;
+    private readonly AdminClient _admin;
     private readonly ILogger<MessageConsumerService> _logger;
     private readonly IConfiguration _configuration;
 
     public MessageConsumerService(
         QueueTiClient client,
-        IHttpClientFactory httpClientFactory,
+        AdminClient admin,
         ILogger<MessageConsumerService> logger,
         IConfiguration configuration)
     {
         _client = client;
-        _http = httpClientFactory.CreateClient();
+        _admin = admin;
         _logger = logger;
         _configuration = configuration;
     }
@@ -28,47 +26,37 @@ internal sealed class MessageConsumerService : BackgroundService
     {
         var topic = _configuration.GetValue<string>("Consumer:Topic") ?? "messages";
         var group = _configuration.GetValue<string>("Consumer:Group") ?? "sample-consumer";
-        var apiBaseUrl = _configuration.GetValue<string>("QueueTi:queue:HttpUrl");
 
         _logger.LogInformation("Starting consumer on topic '{Topic}', group '{Group}'", topic, group);
 
-        if (apiBaseUrl is not null)
-        {
-            await RegisterConsumerGroupAsync(apiBaseUrl, topic, group, stoppingToken);
-        }
+        await RegisterConsumerGroupAsync(topic, group, stoppingToken);
 
-        var consumer = _client.NewConsumer(topic, new ConsumerOptions
-        {
-            ConsumerGroup = group
-        });
+        var consumer = _client.NewConsumer(topic, new ConsumerOptions { ConsumerGroup = group });
 
         await consumer.ConsumeAsync((msg, ct) =>
         {
             var text = Encoding.UTF8.GetString(msg.Payload);
-            _logger.LogInformation(
-                "Message {Id} (retry {Retry}): {Payload}",
-                msg.Id, msg.RetryCount, text);
+            _logger.LogInformation("Message {Id} (retry {Retry}): {Payload}", msg.Id, msg.RetryCount, text);
             return Task.CompletedTask;
         }, stoppingToken);
     }
 
-    private async Task RegisterConsumerGroupAsync(string apiBaseUrl, string topic, string group, CancellationToken ct)
+    private async Task RegisterConsumerGroupAsync(string topic, string group, CancellationToken ct)
     {
-        var url = $"{apiBaseUrl.TrimEnd('/')}/api/topics/{Uri.EscapeDataString(topic)}/consumer-groups";
         var backoff = TimeSpan.FromMilliseconds(500);
 
         while (true)
         {
             try
             {
-                using var content = JsonContent.Create(new { consumer_group = group });
-                var response = await _http.PostAsync(url, content, ct);
-                if (response.StatusCode is HttpStatusCode.Created or HttpStatusCode.OK or HttpStatusCode.Conflict)
-                {
-                    _logger.LogInformation("Consumer group '{Group}' registered on topic '{Topic}'", group, topic);
-                    return;
-                }
-                _logger.LogWarning("Consumer group registration returned {Status}; retrying in {Backoff}", (int)response.StatusCode, backoff);
+                await _admin.RegisterConsumerGroupAsync(topic, group, ct);
+                _logger.LogInformation("Consumer group '{Group}' registered on topic '{Topic}'", group, topic);
+                return;
+            }
+            catch (QueueTiConflictException)
+            {
+                _logger.LogInformation("Consumer group '{Group}' already registered on topic '{Topic}'", group, topic);
+                return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

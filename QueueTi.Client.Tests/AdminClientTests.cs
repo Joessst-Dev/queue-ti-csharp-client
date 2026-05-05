@@ -43,7 +43,7 @@ public sealed class AdminClientTests
             {
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.WriteAsync(
-                    """[{"topic":"orders","replayable":true,"maxRetries":3}]""");
+                    """[{"topic":"orders","replayable":true,"max_retries":3}]""");
             });
         });
 
@@ -73,7 +73,7 @@ public sealed class AdminClientTests
                 capturedBody = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.WriteAsync(
-                    """{"topic":"orders","replayable":false,"maxRetries":5}""");
+                    """{"topic":"orders","replayable":false,"max_retries":5}""");
             });
         });
 
@@ -91,7 +91,7 @@ public sealed class AdminClientTests
         using var doc = JsonDocument.Parse(capturedBody);
         Assert.Equal("orders", doc.RootElement.GetProperty("topic").GetString());
         Assert.False(doc.RootElement.GetProperty("replayable").GetBoolean());
-        Assert.Equal(5, doc.RootElement.GetProperty("maxRetries").GetInt32());
+        Assert.Equal(5, doc.RootElement.GetProperty("max_retries").GetInt32());
 
         client.Dispose();
         await host.StopAsync();
@@ -151,7 +151,7 @@ public sealed class AdminClientTests
             {
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.WriteAsync(
-                    """[{"topic":"orders","schemaJson":"{}","version":1,"updatedAt":"2024-01-01T00:00:00Z"}]""");
+                    """[{"topic":"orders","schema_json":"{}","version":1,"updated_at":"2024-01-01T00:00:00Z"}]""");
             });
         });
 
@@ -179,7 +179,7 @@ public sealed class AdminClientTests
             {
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.WriteAsync(
-                    """{"topic":"orders","schemaJson":"{}","version":2,"updatedAt":"2024-06-01T00:00:00Z"}""");
+                    """{"topic":"orders","schema_json":"{}","version":2,"updated_at":"2024-06-01T00:00:00Z"}""");
             });
         });
 
@@ -229,7 +229,7 @@ public sealed class AdminClientTests
                 capturedBody = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.WriteAsync(
-                    """{"topic":"orders","schemaJson":"{\"type\":\"object\"}","version":3,"updatedAt":"2024-09-01T00:00:00Z"}""");
+                    """{"topic":"orders","schema_json":"{\"type\":\"object\"}","version":3,"updated_at":"2024-09-01T00:00:00Z"}""");
             });
         });
 
@@ -244,7 +244,7 @@ public sealed class AdminClientTests
 
         Assert.NotNull(capturedBody);
         using var doc = JsonDocument.Parse(capturedBody);
-        Assert.Equal(schema, doc.RootElement.GetProperty("schemaJson").GetString());
+        Assert.Equal(schema, doc.RootElement.GetProperty("schema_json").GetString());
 
         client.Dispose();
         await host.StopAsync();
@@ -340,7 +340,7 @@ public sealed class AdminClientTests
         // Assert (Then)
         Assert.NotNull(capturedBody);
         using var doc = JsonDocument.Parse(capturedBody);
-        Assert.Equal("group-c", doc.RootElement.GetProperty("group").GetString());
+        Assert.Equal("group-c", doc.RootElement.GetProperty("consumer_group").GetString());
 
         client.Dispose();
         await host.StopAsync();

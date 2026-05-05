@@ -3,7 +3,7 @@
 [![NuGet](https://img.shields.io/nuget/v/QueueTi.Client)](https://www.nuget.org/packages/QueueTi.Client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A proto-first gRPC client library for the [QueueTi](https://github.com/Joessst-Dev/queue-ti) distributed message queue service. Targets `.NET 10.0`.
+A proto-first gRPC client library for the [QueueTi](https://github.com/Joessst-Dev/queue-ti) distributed message queue service. Targets `.NET 8.0`.
 
 ## Installation
 
@@ -325,16 +325,13 @@ string id = await producer.PublishAsync("orders", payload, new PublishOptions
 
 ### Consumer Group Registration
 
-QueueTi requires consumer groups to be explicitly registered before any messages can be delivered. Register a consumer group via the QueueTi HTTP API before calling `ConsumeAsync()` or `ConsumeBatchAsync()`:
+QueueTi requires consumer groups to be explicitly registered before any messages can be delivered. Use `AdminClient.RegisterConsumerGroupAsync()` before calling `ConsumeAsync()` or `ConsumeBatchAsync()`:
 
 ```csharp
-// Use a long-lived shared client or IHttpClientFactory in production
-var response = await _httpClient.PostAsync(
-    "http://queue:8080/api/topics/orders/consumer-groups",
-    JsonContent.Create(new { consumer_group = "billing" }));
+await admin.RegisterConsumerGroupAsync("orders", "billing");
 ```
 
-The endpoint returns `201 Created` on success. See the samples below for an example of robust group registration with retry logic.
+`QueueTiConflictException` is thrown if the group is already registered — treat this as success. See the samples below for an example of robust group registration with exponential backoff retry.
 
 ### Streaming consumer (real-time processing)
 
@@ -726,10 +723,10 @@ Three complete sample projects are included in the `samples/` directory:
 - Uses `AddQueueTiClient("queue")` from the Aspire integration.
 
 **`QueueTi.Samples.Consumer`** — Worker Service:
-- On startup, registers the consumer group via `POST /api/topics/{topic}/consumer-groups` with exponential backoff retry (up to 30 seconds) until success.
+- On startup, registers the consumer group via `AdminClient.RegisterConsumerGroupAsync()` with exponential backoff retry (up to 30 seconds) until success. `QueueTiConflictException` (already registered) is treated as success.
 - Opens a `Subscribe` stream using `ConsumeAsync()` and logs each received message.
 - Topic and consumer group configurable via `Consumer:Topic` and `Consumer:Group` environment variables.
-- Uses `AddQueueTiClient("queue")` from the Aspire integration.
+- Uses `AddQueueTiClient("queue")` from the Aspire integration, which also registers `AdminClient` when the HTTP URL is configured.
 
 To run the samples:
 
