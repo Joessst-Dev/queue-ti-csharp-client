@@ -9,10 +9,6 @@ namespace QueueTi;
 
 public sealed class AdminClient : IDisposable, IAsyncDisposable
 {
-    private static readonly TimeSpan _refreshMinBackoff = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan _refreshMaxBackoff = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan _refreshLeadTime = TimeSpan.FromSeconds(60);
-
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -22,7 +18,6 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
 
     private readonly HttpClient _http;
     private readonly TokenStore? _tokenStore;
-    private readonly QueueTiClientOptions? _options;
     private readonly ILogger<AdminClient> _logger;
     private readonly bool _ownsHttpClient;
     private readonly CancellationTokenSource _refreshCts = new();
@@ -42,14 +37,13 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(httpClient);
 
         _http = httpClient;
-        _options = options;
         _ownsHttpClient = ownsHttpClient;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<AdminClient>();
 
         _tokenStore = tokenStore ?? (options?.BearerToken is not null ? new TokenStore(options.BearerToken) : null);
 
         _refreshTask = options?.TokenRefresher is not null && _tokenStore is not null
-            ? RunTokenRefreshLoopAsync(_refreshCts.Token)
+            ? TokenRefreshLoop.RunAsync(_tokenStore, options.TokenRefresher, _logger, _refreshCts.Token)
             : Task.CompletedTask;
     }
 
@@ -67,15 +61,26 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         if (options.BearerToken is not null)
         {
             store = new TokenStore(options.BearerToken);
-            handler = new BearerTokenHandler(store) { InnerHandler = new HttpClientHandler() };
+            handler = new BearerTokenHandler(store) { InnerHandler = BuildHttpClientHandler(options) };
         }
         else
         {
-            handler = new HttpClientHandler();
+            handler = BuildHttpClientHandler(options);
         }
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
         return new AdminClient(httpClient, options, store, ownsHttpClient: true, loggerFactory);
+    }
+
+    private static HttpClientHandler BuildHttpClientHandler(QueueTiClientOptions options)
+    {
+        var handler = new HttpClientHandler();
+        if (options.Insecure)
+        {
+            handler.ServerCertificateCustomValidationCallback =
+                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        }
+        return handler;
     }
 
     public void SetToken(string token)
@@ -220,49 +225,6 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         }
 
         response.EnsureSuccessStatusCode();
-    }
-
-    private async Task RunTokenRefreshLoopAsync(CancellationToken ct)
-    {
-        var backoff = _refreshMinBackoff;
-
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                var expiry = _tokenStore!.GetExpiry();
-                var delay = expiry - DateTimeOffset.UtcNow - _refreshLeadTime;
-
-                if (delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(delay, ct);
-                }
-
-                var newToken = await _options!.TokenRefresher!(ct);
-                _tokenStore.Set(newToken);
-                _logger.LogInformation("Bearer token refreshed successfully.");
-                backoff = _refreshMinBackoff;
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Token refresh failed; retrying in {Backoff}.", backoff);
-                try
-                {
-                    await Task.Delay(backoff, ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var next = backoff * 2;
-                backoff = next < _refreshMaxBackoff ? next : _refreshMaxBackoff;
-            }
-        }
     }
 
     public void Dispose()

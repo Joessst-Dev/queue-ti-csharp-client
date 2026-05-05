@@ -26,10 +26,20 @@ public static class ServiceCollectionExtensions
         }
 
         var capturedStore = sharedTokenStore;
-        var httpClientBuilder = services.AddHttpClient("QueueTiAdmin", client =>
+        var clientName = $"QueueTiAdmin:{baseUrl}";
+        var httpClientBuilder = services.AddHttpClient(clientName, client =>
         {
             client.BaseAddress = new Uri(baseUrl);
         });
+
+        if (options.Insecure)
+        {
+            httpClientBuilder.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback =
+                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            });
+        }
 
         if (capturedStore is not null)
         {
@@ -38,13 +48,12 @@ public static class ServiceCollectionExtensions
 
         options.ConfigureHttpClientBuilder?.Invoke(httpClientBuilder);
 
-        var capturedOptions = options;
         services.AddSingleton(sp =>
         {
             var factory = sp.GetRequiredService<IHttpClientFactory>();
             var loggerFactory = sp.GetService<ILoggerFactory>();
-            var httpClient = factory.CreateClient("QueueTiAdmin");
-            return new AdminClient(httpClient, capturedOptions, capturedStore, ownsHttpClient: false, loggerFactory);
+            var httpClient = factory.CreateClient(clientName);
+            return new AdminClient(httpClient, options, capturedStore, ownsHttpClient: false, loggerFactory);
         });
 
         return services;

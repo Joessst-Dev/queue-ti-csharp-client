@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -61,13 +62,15 @@ public sealed class AdminClientTests
     }
 
     [Fact]
-    public async Task UpsertTopicConfigAsync_GivenOkResponse_ShouldReturnUpdatedConfig()
+    public async Task UpsertTopicConfigAsync_GivenOkResponse_ShouldSendConfigAndReturnUpdated()
     {
         // Arrange (Given)
+        string? capturedBody = null;
         var (client, host) = await BuildAsync(ep =>
         {
             ep.MapPut("/api/topic-configs/{topic}", async ctx =>
             {
+                capturedBody = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.WriteAsync(
                     """{"topic":"orders","replayable":false,"maxRetries":5}""");
@@ -83,6 +86,12 @@ public sealed class AdminClientTests
         Assert.Equal("orders", result.Topic);
         Assert.False(result.Replayable);
         Assert.Equal(5, result.MaxRetries);
+
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody);
+        Assert.Equal("orders", doc.RootElement.GetProperty("topic").GetString());
+        Assert.False(doc.RootElement.GetProperty("replayable").GetBoolean());
+        Assert.Equal(5, doc.RootElement.GetProperty("maxRetries").GetInt32());
 
         client.Dispose();
         await host.StopAsync();
@@ -104,6 +113,28 @@ public sealed class AdminClientTests
 
         // Act & Assert (When & Then)
         await client.DeleteTopicConfigAsync("orders");
+
+        client.Dispose();
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    [Fact]
+    public async Task DeleteTopicConfigAsync_GivenNotFound_ShouldThrowNotFoundException()
+    {
+        // Arrange (Given)
+        var (client, host) = await BuildAsync(ep =>
+        {
+            ep.MapDelete("/api/topic-configs/{topic}", ctx =>
+            {
+                ctx.Response.StatusCode = 404;
+                return Task.CompletedTask;
+            });
+        });
+
+        // Act & Assert (When & Then)
+        await Assert.ThrowsAsync<QueueTiNotFoundException>(
+            () => client.DeleteTopicConfigAsync("missing-topic"));
 
         client.Dispose();
         await host.StopAsync();
@@ -187,25 +218,33 @@ public sealed class AdminClientTests
     }
 
     [Fact]
-    public async Task UpsertTopicSchemaAsync_GivenOkResponse_ShouldReturnSchema()
+    public async Task UpsertTopicSchemaAsync_GivenOkResponse_ShouldSendSchemaJsonAndReturnSchema()
     {
         // Arrange (Given)
+        string? capturedBody = null;
         var (client, host) = await BuildAsync(ep =>
         {
             ep.MapPut("/api/topic-schemas/{topic}", async ctx =>
             {
+                capturedBody = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.WriteAsync(
                     """{"topic":"orders","schemaJson":"{\"type\":\"object\"}","version":3,"updatedAt":"2024-09-01T00:00:00Z"}""");
             });
         });
 
+        const string schema = """{"type":"object"}""";
+
         // Act (When)
-        var result = await client.UpsertTopicSchemaAsync("orders", """{"type":"object"}""");
+        var result = await client.UpsertTopicSchemaAsync("orders", schema);
 
         // Assert (Then)
         Assert.Equal("orders", result.Topic);
         Assert.Equal(3, result.Version);
+
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody);
+        Assert.Equal(schema, doc.RootElement.GetProperty("schemaJson").GetString());
 
         client.Dispose();
         await host.StopAsync();
@@ -282,20 +321,26 @@ public sealed class AdminClientTests
     }
 
     [Fact]
-    public async Task RegisterConsumerGroupAsync_GivenCreated_ShouldSucceed()
+    public async Task RegisterConsumerGroupAsync_GivenCreated_ShouldSendGroupName()
     {
         // Arrange (Given)
+        string? capturedBody = null;
         var (client, host) = await BuildAsync(ep =>
         {
-            ep.MapPost("/api/topics/{topic}/consumer-groups", ctx =>
+            ep.MapPost("/api/topics/{topic}/consumer-groups", async ctx =>
             {
+                capturedBody = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
                 ctx.Response.StatusCode = 201;
-                return Task.CompletedTask;
             });
         });
 
-        // Act & Assert (When & Then)
+        // Act (When)
         await client.RegisterConsumerGroupAsync("orders", "group-c");
+
+        // Assert (Then)
+        Assert.NotNull(capturedBody);
+        using var doc = JsonDocument.Parse(capturedBody);
+        Assert.Equal("group-c", doc.RootElement.GetProperty("group").GetString());
 
         client.Dispose();
         await host.StopAsync();
@@ -369,7 +414,6 @@ public sealed class AdminClientTests
         // Swap the client for one with a token
         client.Dispose();
         const string token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0IiwiZXhwIjo5OTk5OTk5OTk5fQ.sig";
-        var options = new QueueTiClientOptions { BearerToken = token };
         var handler = new BearerTokenHandler(new TokenStore(token)) { InnerHandler = host.GetTestServer().CreateHandler() };
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         using var tokenClient = new AdminClient(httpClient);

@@ -52,6 +52,7 @@ public static class AspireQueueTiClientExtensions
         {
             builder.Services.AddQueueTiAdminClient(settings.HttpUrl, opts =>
             {
+                opts.Insecure = settings.HttpUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
                 opts.BearerToken = settings.BearerToken;
                 opts.TokenRefresher = settings.TokenRefresher;
             });

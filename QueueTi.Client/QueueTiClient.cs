@@ -8,10 +8,6 @@ namespace QueueTi;
 
 public sealed class QueueTiClient : IDisposable, IAsyncDisposable
 {
-    private static readonly TimeSpan _refreshMinBackoff = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan _refreshMaxBackoff = TimeSpan.FromSeconds(60);
-    // Refresh 60 seconds before token expiry so the transition is seamless.
-    private static readonly TimeSpan _refreshLeadTime = TimeSpan.FromSeconds(60);
 
     private readonly QueueService.QueueServiceClient _grpcClient;
     private readonly QueueTiClientOptions _options;
@@ -50,7 +46,7 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
         _tokenStore = tokenStore ?? (options.BearerToken is not null ? new TokenStore(options.BearerToken) : null);
 
         _refreshTask = options.TokenRefresher is not null && _tokenStore is not null
-            ? RunTokenRefreshLoopAsync(_refreshCts.Token)
+            ? TokenRefreshLoop.RunAsync(_tokenStore, options.TokenRefresher, _logger, _refreshCts.Token)
             : Task.CompletedTask;
     }
 
@@ -106,49 +102,6 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
         }
 
         _tokenStore.Set(token);
-    }
-
-    private async Task RunTokenRefreshLoopAsync(CancellationToken ct)
-    {
-        var backoff = _refreshMinBackoff;
-
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                var expiry = _tokenStore!.GetExpiry();
-                var delay = expiry - DateTimeOffset.UtcNow - _refreshLeadTime;
-
-                if (delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(delay, ct);
-                }
-
-                var newToken = await _options.TokenRefresher!(ct);
-                _tokenStore.Set(newToken);
-                _logger.LogInformation("Bearer token refreshed successfully.");
-                backoff = _refreshMinBackoff;
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Token refresh failed; retrying in {Backoff}.", backoff);
-                try
-                {
-                    await Task.Delay(backoff, ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var next = backoff * 2;
-                backoff = next < _refreshMaxBackoff ? next : _refreshMaxBackoff;
-            }
-        }
     }
 
     public void Dispose()
