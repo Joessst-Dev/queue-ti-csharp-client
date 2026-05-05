@@ -62,9 +62,9 @@ try
     var dlqConsumer = client.NewConsumer(DlqTopic, new ConsumerOptions { ConsumerGroup = DlqConsumerGroup });
     await DrainDlqAsync(dlqConsumer);
 }
-catch (HttpRequestException ex)
+catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.InternalServerError)
 {
-    Console.WriteLine($"[dlq] Skipping drain — DLQ topic not available yet ({(int?)ex.StatusCode} {ex.StatusCode}).");
+    Console.WriteLine("[dlq] Skipping drain — DLQ topic not available yet (no messages dead-lettered).");
 }
 
 Console.WriteLine("\nDone.");
