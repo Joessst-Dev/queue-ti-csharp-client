@@ -7,7 +7,30 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>QueueTi</RootNamespace>
     <AssemblyName>QueueTi.Client</AssemblyName>
+
+    <!-- NuGet package metadata -->
+    <PackageId>QueueTi.Client</PackageId>
+    <Version>0.0.0</Version>
+    <Description>C# client library for the QueueTi distributed message queue service.</Description>
+    <Authors>Joessst-Dev</Authors>
+    <PackageTags>grpc;queue;messaging;queueti</PackageTags>
+    <PackageProjectUrl>https://github.com/Joessst-Dev/queue-ti-csharp-client</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Joessst-Dev/queue-ti-csharp-client</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath="/" />
+    <None Include="../LICENSE" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="9.0.0" PrivateAssets="All" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Google.Protobuf" Version="3.29.3" />
