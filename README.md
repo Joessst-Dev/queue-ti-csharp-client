@@ -624,21 +624,20 @@ Use `QueueTiAuth` to check whether the server requires authentication and to log
 ```csharp
 using QueueTi;
 
-// Check whether the server has auth enabled
-bool authRequired = await QueueTiAuth.GetAuthRequiredAsync("http://queue.example.com");
+const string HttpAddress = "http://queue.example.com:8080";  // REST API
+const string GrpcAddress = "http://queue.example.com:50051"; // gRPC
 
-if (authRequired)
+string? bearerToken = null;
+
+if (await QueueTiAuth.GetAuthRequiredAsync(HttpAddress))
 {
-    string token = await QueueTiAuth.LoginAsync(
-        baseUrl: "http://queue.example.com",
-        username: "admin",
-        password: "secret");
-
-    var client = QueueTiClient.Create("http://queue.example.com", new QueueTiClientOptions
-    {
-        BearerToken = token
-    });
+    bearerToken = await QueueTiAuth.LoginAsync(HttpAddress, username: "admin", password: "secret");
 }
+
+var client = QueueTiClient.Create(GrpcAddress, new QueueTiClientOptions
+{
+    BearerToken = bearerToken  // null when auth is disabled
+});
 ```
 
 Both methods accept an `insecure` flag (set `true` for plain `http://` endpoints) and an optional `CancellationToken`.
@@ -778,13 +777,9 @@ The `examples/` directory contains self-contained console apps that run against 
 - The DLQ monitor polls for registration until the `orders.dlq` topic exists (created server-side on first dead-letter), then drains it in 5-second batch windows.
 - Both loops stop cleanly on Ctrl+C.
 
-To run it against a local QueueTi instance:
+To run it against a local QueueTi instance (see the [QueueTi server repo](https://github.com/Joessst-Dev/queue-ti) for setup):
 
 ```bash
-# From the repo root — start QueueTi with docker-compose
-cd /path/to/queue-ti && docker-compose up -d
-
-# Run the example
 dotnet run --project examples/OrderPipeline/
 ```
 
