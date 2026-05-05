@@ -94,6 +94,36 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         return await LoginAsync(http, username, password, ct);
     }
 
+    public static async Task<bool> GetAuthRequiredAsync(
+        string baseUrl,
+        bool insecure = false,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+
+        var handler = new HttpClientHandler();
+        if (insecure)
+        {
+            handler.ServerCertificateCustomValidationCallback =
+                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        }
+
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+        return await GetAuthRequiredAsync(http, ct);
+    }
+
+    internal static async Task<bool> GetAuthRequiredAsync(
+        HttpClient http,
+        CancellationToken ct = default)
+    {
+        using var response = await http.GetAsync("/api/auth/status", ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return doc.RootElement.TryGetProperty("auth_required", out var prop) && prop.GetBoolean();
+    }
+
     internal static async Task<string> LoginAsync(
         HttpClient http,
         string username,
@@ -101,19 +131,19 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         CancellationToken ct = default)
     {
         var body = new { username, password };
-        using var response = await http.PostAsJsonAsync("/auth/login", body, ct);
+        using var response = await http.PostAsJsonAsync("/api/auth/login", body, ct);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
         using var doc = System.Text.Json.JsonDocument.Parse(json);
 
-        if (!doc.RootElement.TryGetProperty("access_token", out var prop))
+        if (!doc.RootElement.TryGetProperty("token", out var prop))
         {
-            throw new InvalidOperationException("Login response did not contain 'access_token'.");
+            throw new InvalidOperationException("Login response did not contain 'token'.");
         }
 
         return prop.GetString()
-            ?? throw new InvalidOperationException("'access_token' in login response was null.");
+            ?? throw new InvalidOperationException("'token' in login response was null.");
     }
 
     private static HttpClientHandler BuildHttpClientHandler(QueueTiClientOptions options)

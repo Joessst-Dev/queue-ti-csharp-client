@@ -454,7 +454,7 @@ public sealed class AdminClientTests
     }
 
     [Fact]
-    public async Task LoginAsync_GivenValidCredentials_ShouldReturnAccessToken()
+    public async Task LoginAsync_GivenValidCredentials_ShouldReturnToken()
     {
         // Arrange (Given)
         string? capturedUsername = null;
@@ -462,14 +462,14 @@ public sealed class AdminClientTests
 
         var (_, host) = await BuildAsync(ep =>
         {
-            ep.MapPost("/auth/login", async ctx =>
+            ep.MapPost("/api/auth/login", async ctx =>
             {
                 using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
                 capturedUsername = doc.RootElement.GetProperty("username").GetString();
                 capturedPassword = doc.RootElement.GetProperty("password").GetString();
 
                 ctx.Response.ContentType = "application/json";
-                await ctx.Response.WriteAsync("""{"access_token":"test-jwt-token"}""");
+                await ctx.Response.WriteAsync("""{"token":"test-jwt-token"}""");
             });
         });
 
@@ -493,7 +493,7 @@ public sealed class AdminClientTests
         // Arrange (Given)
         var (_, host) = await BuildAsync(ep =>
         {
-            ep.MapPost("/auth/login", ctx =>
+            ep.MapPost("/api/auth/login", ctx =>
             {
                 ctx.Response.StatusCode = 401;
                 return Task.CompletedTask;
@@ -511,15 +511,15 @@ public sealed class AdminClientTests
     }
 
     [Fact]
-    public async Task LoginAsync_GivenResponseWithoutAccessToken_ShouldThrowInvalidOperationException()
+    public async Task LoginAsync_GivenResponseWithoutTokenField_ShouldThrowInvalidOperationException()
     {
         // Arrange (Given)
         var (_, host) = await BuildAsync(ep =>
         {
-            ep.MapPost("/auth/login", async ctx =>
+            ep.MapPost("/api/auth/login", async ctx =>
             {
                 ctx.Response.ContentType = "application/json";
-                await ctx.Response.WriteAsync("""{"token":"unexpected-field"}""");
+                await ctx.Response.WriteAsync("""{"access_token":"wrong-field-name"}""");
             });
         });
 
@@ -528,7 +528,57 @@ public sealed class AdminClientTests
         // Act & Assert (When & Then)
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => AdminClient.LoginAsync(http, "admin", "admin"));
-        Assert.Contains("access_token", ex.Message);
+        Assert.Contains("token", ex.Message);
+
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    [Fact]
+    public async Task GetAuthRequiredAsync_GivenAuthEnabled_ShouldReturnTrue()
+    {
+        // Arrange (Given)
+        var (_, host) = await BuildAsync(ep =>
+        {
+            ep.MapGet("/api/auth/status", async ctx =>
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"auth_required":true}""");
+            });
+        });
+
+        var http = host.GetTestServer().CreateClient();
+
+        // Act (When)
+        var result = await AdminClient.GetAuthRequiredAsync(http);
+
+        // Assert (Then)
+        Assert.True(result);
+
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    [Fact]
+    public async Task GetAuthRequiredAsync_GivenAuthDisabled_ShouldReturnFalse()
+    {
+        // Arrange (Given)
+        var (_, host) = await BuildAsync(ep =>
+        {
+            ep.MapGet("/api/auth/status", async ctx =>
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"auth_required":false}""");
+            });
+        });
+
+        var http = host.GetTestServer().CreateClient();
+
+        // Act (When)
+        var result = await AdminClient.GetAuthRequiredAsync(http);
+
+        // Assert (Then)
+        Assert.False(result);
 
         await host.StopAsync();
         host.Dispose();

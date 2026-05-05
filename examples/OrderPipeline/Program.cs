@@ -16,13 +16,17 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-var username = Environment.GetEnvironmentVariable("QUEUETI_USERNAME") ?? "admin";
-var password = Environment.GetEnvironmentVariable("QUEUETI_PASSWORD") ?? "admin";
+string? bearerToken = null;
 
-Console.WriteLine("[setup] Logging in...");
-var token = await AdminClient.LoginAsync(HttpAddress, username, password, insecure: true, cts.Token);
+if (await AdminClient.GetAuthRequiredAsync(HttpAddress, insecure: true, cts.Token))
+{
+    var username = Environment.GetEnvironmentVariable("QUEUETI_USERNAME") ?? "admin";
+    var password = Environment.GetEnvironmentVariable("QUEUETI_PASSWORD") ?? "admin";
+    Console.WriteLine("[setup] Auth enabled — logging in...");
+    bearerToken = await AdminClient.LoginAsync(HttpAddress, username, password, insecure: true, cts.Token);
+}
 
-var clientOptions = new QueueTiClientOptions { Insecure = true, BearerToken = token };
+var clientOptions = new QueueTiClientOptions { Insecure = true, BearerToken = bearerToken };
 
 await using var client = QueueTiClient.Create(GrpcAddress, clientOptions);
 await using var admin = AdminClient.Create(HttpAddress, clientOptions);
