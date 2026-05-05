@@ -103,7 +103,9 @@ var client = new QueueTiClient(grpcClient, new QueueTiClientOptions());
 
 ## Dependency Injection (ASP.NET Core)
 
-Register the client in your service container using `AddQueueTiClient()`:
+### Registering QueueTiClient
+
+Register the gRPC client in your service container using `AddQueueTiClient()`:
 
 ```csharp
 builder.Services.AddQueueTiClient("https://queue.example.com", opts =>
@@ -127,6 +129,28 @@ app.MapPost("/orders", async (QueueTiClient client) =>
 ```
 
 When `Insecure = true`, the DI path configures the gRPC channel to use plaintext HTTP credentials automatically through the `AddGrpcClient` code path.
+
+### Registering AdminClient
+
+Register the admin REST client using `AddQueueTiAdminClient()`:
+
+```csharp
+builder.Services.AddQueueTiAdminClient("http://queue.example.com", opts =>
+{
+    opts.BearerToken = "admin-token";
+    opts.TokenRefresher = async ct => await GetFreshAdminTokenAsync(ct);
+});
+
+// Inject AdminClient into your services
+app.MapPost("/admin/topics/{topic}", async (AdminClient admin, string topic) =>
+{
+    var config = new TopicConfig(Topic: topic, Replayable: true, MaxRetries: 3);
+    await admin.UpsertTopicConfigAsync(topic, config);
+    return Results.Created($"/admin/topics/{topic}", config);
+});
+```
+
+`AddQueueTiAdminClient()` uses `IHttpClientFactory` internally. The `BearerToken`, `TokenRefresher`, and `Insecure` options all apply the same way as for `QueueTiClient`.
 
 ## .NET Aspire Integration
 
@@ -219,7 +243,7 @@ app.Run();
 The client automatically:
 - Reads the connection string from `ConnectionStrings:queue` (set by Aspire).
 - Registers `QueueTiClient` in DI (and the underlying `QueueService.QueueServiceClient`).
-- Configures health checks (if `HttpUrl` is set; see Health Checks section below).
+- If `QueueTiClientSettings.HttpUrl` is set, also registers `AdminClient` in DI and configures health checks (see Health Checks section below).
 - Instruments outbound gRPC calls with OpenTelemetry tracing.
 
 **With custom settings:**
@@ -413,6 +437,187 @@ await msg.NackAsync("Database connection timeout", ct);
 
 **In batch mode**, you must call `AckAsync()` or `NackAsync()` explicitly for each message.
 
+## Admin Client
+
+The `AdminClient` wraps the QueueTi admin REST API to manage topic configurations, schemas, and consumer group registration. It is available in the same `QueueTi.Client` NuGet package as `QueueTiClient`.
+
+### Creating an admin client
+
+Use the factory method for a managed HTTP client:
+
+```csharp
+using QueueTi;
+
+var admin = AdminClient.Create(
+    baseUrl: "http://queue.example.com",
+    options: new QueueTiClientOptions
+    {
+        BearerToken = "your-jwt-token"  // optional
+    }
+);
+```
+
+Or inject via dependency injection (see "Dependency Injection" section above).
+
+For manual HTTP client management (e.g., with `IHttpClientFactory`), use the constructor directly:
+
+```csharp
+var admin = new AdminClient(httpClient);
+```
+
+When using this constructor, you are responsible for wiring authentication headers yourself (for example via a `DelegatingHandler`). `SetToken()` is not available with this constructor — it requires a `TokenStore` configured through `AdminClient.Create` or `AddQueueTiAdminClient`.
+
+### Topic Configuration
+
+Manage topic settings:
+
+```csharp
+// List all topic configurations
+var configs = await admin.ListTopicConfigsAsync();
+foreach (var config in configs)
+{
+    Console.WriteLine($"Topic: {config.Topic}, Replayable: {config.Replayable}");
+}
+
+// Get or create a topic configuration
+var created = await admin.UpsertTopicConfigAsync("orders", new TopicConfig(
+    Topic: "orders",
+    Replayable: true,
+    MaxRetries: 3,
+    MessageTtlSeconds: 86400,
+    MaxDepth: 10000
+));
+
+// Delete a topic configuration
+await admin.DeleteTopicConfigAsync("orders");
+```
+
+`TopicConfig` properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Topic` | `string` | Topic name (immutable). |
+| `Replayable` | `bool` | Whether the topic supports message replay. |
+| `MaxRetries` | `int?` | Maximum retry attempts for a message before it becomes dead-lettered. |
+| `MessageTtlSeconds` | `int?` | Time-to-live for messages (in seconds) before automatic expiry. |
+| `MaxDepth` | `int?` | Maximum number of unacknowledged messages to queue. |
+| `ReplayWindowSeconds` | `int?` | Window during which messages can be replayed. |
+| `ThroughputLimit` | `int?` | Rate limit (messages per second) for this topic. |
+
+### Topic Schema
+
+Manage topic schemas for schema validation:
+
+```csharp
+// List all topic schemas
+var schemas = await admin.ListTopicSchemasAsync();
+
+// Get the current schema for a topic
+var schema = await admin.GetTopicSchemaAsync("orders");
+Console.WriteLine($"Version: {schema.Version}, Updated: {schema.UpdatedAt}");
+
+// Upsert a schema (JSON schema as a string)
+var schemaJson = @"{
+    ""type"": ""object"",
+    ""properties"": {
+        ""order_id"": { ""type"": ""string"" },
+        ""amount"": { ""type"": ""number"" }
+    },
+    ""required"": [""order_id""]
+}";
+
+var updated = await admin.UpsertTopicSchemaAsync("orders", schemaJson);
+
+// Delete a topic schema
+await admin.DeleteTopicSchemaAsync("orders");
+```
+
+`TopicSchema` properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Topic` | `string` | Topic name. |
+| `SchemaJson` | `string` | The schema definition as a JSON string. |
+| `Version` | `int` | Schema version (incremented on each update). |
+| `UpdatedAt` | `string` | ISO 8601 timestamp of the last update. |
+
+### Consumer Group Management
+
+Register and unregister consumer groups:
+
+```csharp
+// List consumer groups for a topic
+var groups = await admin.ListConsumerGroupsAsync("orders");
+foreach (var group in groups)
+{
+    Console.WriteLine($"Group: {group}");
+}
+
+// Register a consumer group
+await admin.RegisterConsumerGroupAsync("orders", "billing");
+
+// Unregister a consumer group
+await admin.UnregisterConsumerGroupAsync("orders", "billing");
+```
+
+
+### Statistics
+
+Retrieve aggregate queue statistics:
+
+```csharp
+var stats = await admin.StatsAsync();
+foreach (var topicStat in stats)
+{
+    Console.WriteLine($"Topic: {topicStat.Topic}, Status: {topicStat.Status}, Count: {topicStat.Count}");
+}
+```
+
+`TopicStat` properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Topic` | `string` | Topic name. |
+| `Status` | `string` | Status of the topic as reported by the server. |
+| `Count` | `int` | Number of unacknowledged messages on this topic. |
+
+### Error Handling
+
+The admin client throws specific exceptions for HTTP error responses:
+
+```csharp
+try
+{
+    await admin.DeleteTopicConfigAsync("nonexistent");
+}
+catch (QueueTiNotFoundException ex)
+{
+    Console.WriteLine($"Topic not found: {ex.Message}");
+}
+catch (QueueTiConflictException ex)
+{
+    Console.WriteLine($"Conflict (likely already registered): {ex.Message}");
+}
+```
+
+**Exception types:**
+
+- `QueueTiNotFoundException` — Thrown on HTTP 404 (resource not found).
+- `QueueTiConflictException` — Thrown on HTTP 409 (conflict, e.g., topic already exists).
+- Other non-2xx responses throw `HttpRequestException`.
+
+### Cleanup
+
+`AdminClient` implements `IDisposable` and `IAsyncDisposable`:
+
+```csharp
+await admin.DisposeAsync();  // preferred
+// or
+admin.Dispose();
+```
+
+When created via `AdminClient.Create`, the client owns the underlying `HttpClient` and disposes it on cleanup. When constructed with `new AdminClient(httpClient)` or resolved from DI via `AddQueueTiAdminClient`, the caller or the `IHttpClientFactory` owns the `HttpClient` — the client will not dispose it.
+
 ## Bearer Token Authentication
 
 ### Static token
@@ -538,13 +743,14 @@ The AppHost orchestrates Postgres, Redis, and QueueTi containers locally, then r
 ## Thread Safety
 
 - `QueueTiClient` is safe to share across threads. `TokenStore` uses `ReaderWriterLockSlim` internally and disposal is guarded by an atomic flag.
+- `AdminClient` is safe to share across threads. Underlying `HttpClient` is thread-safe.
 - `Producer` and `Consumer` are stateless wrappers; they are safe to use concurrently from multiple tasks.
-- `SetToken()` is thread-safe and updates the interceptor state immediately.
-- `Dispose()` and `DisposeAsync()` are thread-safe and idempotent.
+- `SetToken()` is thread-safe and updates the interceptor state immediately for both clients.
+- `Dispose()` and `DisposeAsync()` are thread-safe and idempotent for both clients.
 
 ## Logging
 
-The client uses `ILogger<QueueTiClient>` and `ILogger<Consumer>` for diagnostics. When using ASP.NET Core DI, configure logging as usual:
+The clients use `ILogger<QueueTiClient>`, `ILogger<Consumer>`, and `ILogger<AdminClient>` for diagnostics. When using ASP.NET Core DI, configure logging as usual:
 
 ```csharp
 builder.Logging.AddConsole();
@@ -552,7 +758,8 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 ```
 
 Key events logged:
-- Bearer token refresh success / failure.
+- Bearer token refresh success / failure (for both clients).
 - Consumer stream reconnection and backoff intervals.
 - Handler exceptions (error level).
 - Nack failures (error level).
+- Admin API errors (error level).
