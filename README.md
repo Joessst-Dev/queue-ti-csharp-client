@@ -158,8 +158,9 @@ var postgres = builder.AddPostgres("postgres")
 var redis = builder.AddRedis("redis"); // optional — enables rate limiting
 
 var queue = builder.AddQueueTi("queue")
+    .WithReplicas(3)                   // optional — defaults to 1
     .WithNpgsqlDatabase(postgres)
-    .WithRedis(redis)                  // omit if rate limiting is not needed
+    .WithRedis(redis)                  // optional — enables rate limiting
     .WithAuthentication(
         username: "admin",
         password: builder.AddParameter("queue-password", secret: true),
@@ -179,6 +180,7 @@ builder.Build().Run();
 | `AddQueueTi(name, grpcPort?, httpPort?, tag?)` | Adds a QueueTi container resource. Pulls `ghcr.io/joessst-dev/queue-ti`. Endpoints: `grpc` (target 50051), `http` (target 8080). |
 | `WithNpgsqlDatabase(database)` | Wires an Npgsql database resource. Sets `QUEUETI_DB_*` env vars and adds `WaitFor` dependency. |
 | `WithRedis(redis)` | Wires an optional Redis resource for rate limiting. Sets `QUEUETI_REDIS_*` env vars and adds `WaitFor` dependency. |
+| `WithReplicas(n)` | Runs `n` instances of QueueTi. All replicas share the same database and Redis resources. |
 | `WithAuthentication(username, password, jwtSecret)` | Configures authentication. Sets `QUEUETI_AUTH_ENABLED` and related env vars from `ParameterResource` values. |
 | `WithLogLevel(level)` | Sets `QUEUETI_LOG_LEVEL`. |
 
