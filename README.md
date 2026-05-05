@@ -132,10 +132,15 @@ The `QueueTi.Aspire.Hosting` and `QueueTi.Client.Aspire` packages provide seamle
 
 ### Installation
 
-Add both packages to your Aspire project:
+Each package targets a different project in your Aspire solution:
 
+**AppHost project:**
 ```bash
 dotnet add package QueueTi.Aspire.Hosting
+```
+
+**Service/worker project:**
+```bash
 dotnet add package QueueTi.Client.Aspire
 ```
 
@@ -187,7 +192,7 @@ app.Run();
 
 The client automatically:
 - Reads the connection string from `ConnectionStrings:queue` (set by Aspire).
-- Registers `QueueService.QueueServiceClient` in DI.
+- Registers `QueueTiClient` in DI (and the underlying `QueueService.QueueServiceClient`).
 - Configures health checks (HTTP GET to `/healthz` on port 8080).
 - Instruments outbound gRPC calls with OpenTelemetry tracing.
 
@@ -196,9 +201,8 @@ The client automatically:
 ```csharp
 builder.AddQueueTiClient("queue", settings =>
 {
-    settings.DisableHealthChecks = false;
-    settings.DisableTracing = false;
-    settings.BearerToken = "optional-token";
+    settings.DisableHealthChecks = true; // if health checks are managed separately
+    settings.BearerToken = "your-jwt";   // if auth is enabled on the server
 });
 ```
 
@@ -214,7 +218,7 @@ builder.AddQueueTiClient("queue", settings =>
 
 ### Health Checks
 
-When `DisableHealthChecks` is false (default), the integration registers an HTTP health check that probes `GET /healthz` on the QueueTi service's HTTP port (default 8080). The check is registered under tag `queueti` and requires no authentication.
+When `DisableHealthChecks` is false (default), the integration registers an HTTP health check that probes `GET /healthz` on the QueueTi service's HTTP port (default 8080). The check is registered under tags `live` and `queueti` and requires no authentication.
 
 ### Distributed Tracing
 
