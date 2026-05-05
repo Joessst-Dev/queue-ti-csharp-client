@@ -11,7 +11,6 @@ namespace QueueTi.Aspire;
 public static class AspireQueueTiClientExtensions
 {
     private const string DefaultConfigSectionName = "QueueTi";
-    private const int DefaultHttpPort = 8080;
 
     public static void AddQueueTiClient(
         this IHostApplicationBuilder builder,
@@ -49,9 +48,9 @@ public static class AspireQueueTiClientExtensions
             opts.TokenRefresher = settings.TokenRefresher;
         });
 
-        if (!settings.DisableHealthChecks)
+        if (!settings.DisableHealthChecks && settings.HttpUrl is not null)
         {
-            var healthUrl = BuildHealthUrl(settings.ConnectionString);
+            var healthUrl = new Uri($"{settings.HttpUrl.TrimEnd('/')}/healthz");
             builder.Services.AddHealthChecks()
                 .Add(new HealthCheckRegistration(
                     $"QueueTi_{connectionName}",
@@ -67,13 +66,4 @@ public static class AspireQueueTiClientExtensions
         }
     }
 
-    private static Uri BuildHealthUrl(string connectionString)
-    {
-        if (Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
-        {
-            return new Uri($"{uri.Scheme}://{uri.Host}:{DefaultHttpPort}/healthz");
-        }
-
-        return new Uri("http://localhost:8080/healthz");
-    }
 }

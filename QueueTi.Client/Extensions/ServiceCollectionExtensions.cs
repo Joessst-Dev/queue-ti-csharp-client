@@ -21,6 +21,12 @@ public static class ServiceCollectionExtensions
 
         var grpcClientBuilder = services.AddGrpcClient<QueueService.QueueServiceClient>(o => o.Address = new Uri(address));
 
+        if (options.Insecure)
+        {
+            grpcClientBuilder.ConfigureChannel(opts =>
+                opts.Credentials = Grpc.Core.ChannelCredentials.Insecure);
+        }
+
         options.ConfigureHttpClientBuilder?.Invoke(grpcClientBuilder);
 
         TokenStore? sharedTokenStore = null;

@@ -7,7 +7,7 @@ public static class QueueTiResourceBuilderExtensions
     private const string ContainerImage = "ghcr.io/joessst-dev/queue-ti";
     private const int DefaultGrpcPort = 50051;
     private const int DefaultHttpPort = 8080;
-    private const string DefaultRedisPort = "6379";
+    private const int DefaultRedisPort = 6379;
 
     public static IResourceBuilder<QueueTiResource> AddQueueTi(
         this IDistributedApplicationBuilder builder,
@@ -77,6 +77,13 @@ public static class QueueTiResourceBuilderExtensions
                     .Where(p => p.Length == 2)
                     .ToDictionary(p => p[0].Trim().ToLowerInvariant(), p => p[1].Trim());
 
+                if (!parts.ContainsKey("username") && !parts.ContainsKey("password"))
+                {
+                    throw new DistributedApplicationException(
+                        $"Could not parse connection string for '{database.Resource.Name}'. " +
+                        "Expected Npgsql semicolon-delimited Key=Value format (e.g. Host=...;Username=...;Password=...).");
+                }
+
                 if (serverContainer is not null)
                 {
                     context.EnvironmentVariables[QueueTiResource.DbHostEnv] = serverContainer.Name;
@@ -145,7 +152,7 @@ public static class QueueTiResourceBuilderExtensions
                 {
                     context.EnvironmentVariables[QueueTiResource.RedisHostEnv] = redisContainer.Name;
                     context.EnvironmentVariables[QueueTiResource.RedisPortEnv] =
-                        (redisEndpoint?.TargetPort ?? int.Parse(DefaultRedisPort)).ToString();
+                        (redisEndpoint?.TargetPort ?? DefaultRedisPort).ToString();
                 }
                 else
                 {
@@ -154,7 +161,7 @@ public static class QueueTiResourceBuilderExtensions
                     context.EnvironmentVariables[QueueTiResource.RedisHostEnv] =
                         colonIdx >= 0 ? firstSegment[..colonIdx] : firstSegment;
                     context.EnvironmentVariables[QueueTiResource.RedisPortEnv] =
-                        colonIdx >= 0 ? firstSegment[(colonIdx + 1)..] : DefaultRedisPort;
+                        colonIdx >= 0 ? firstSegment[(colonIdx + 1)..] : DefaultRedisPort.ToString();
                 }
 
                 if (options.TryGetValue("password", out var password))
