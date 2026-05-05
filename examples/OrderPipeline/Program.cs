@@ -31,9 +31,8 @@ var clientOptions = new QueueTiClientOptions { Insecure = true, BearerToken = be
 await using var client = QueueTiClient.Create(GrpcAddress, clientOptions);
 await using var admin = AdminClient.Create(HttpAddress, clientOptions);
 
-// Configure the topic so nacked messages flow to DLQ after 2 retries
-Console.WriteLine($"[setup] Configuring topic '{Topic}' (MaxRetries=2)...");
-await admin.UpsertTopicConfigAsync(Topic, new TopicConfig(Topic, Replayable: false, MaxRetries: 2), cts.Token);
+Console.WriteLine($"[setup] Configuring topic '{Topic}'...");
+await admin.UpsertTopicConfigAsync(Topic, new TopicConfig(Topic, Replayable: false), cts.Token);
 
 await RegisterGroupAsync(admin, Topic, ConsumerGroup, cts.Token);
 
