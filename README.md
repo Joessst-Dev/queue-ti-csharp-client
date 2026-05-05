@@ -186,7 +186,7 @@ builder.Build().Run();
 
 ### Replicas
 
-`WithReplicas(n)` starts `n` identical QueueTi container instances. Aspire automatically load-balances `WithReference` connections across them, so service projects receive a connection string that round-robins between replicas without any extra configuration.
+`WithReplicas(n)` starts `n` identical QueueTi container instances. When referenced by a service project via `WithReference`, Aspire routes connections across the replicas.
 
 All replicas share the same database and Redis resources — wire those once on the resource builder and each instance picks up the same env vars:
 
