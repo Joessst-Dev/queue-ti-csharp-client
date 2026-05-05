@@ -48,6 +48,15 @@ public static class AspireQueueTiClientExtensions
             opts.TokenRefresher = settings.TokenRefresher;
         });
 
+        if (settings.HttpUrl is not null)
+        {
+            builder.Services.AddQueueTiAdminClient(settings.HttpUrl, opts =>
+            {
+                opts.BearerToken = settings.BearerToken;
+                opts.TokenRefresher = settings.TokenRefresher;
+            });
+        }
+
         if (!settings.DisableHealthChecks && settings.HttpUrl is not null)
         {
             var healthUrl = new Uri($"{settings.HttpUrl.TrimEnd('/')}/healthz");

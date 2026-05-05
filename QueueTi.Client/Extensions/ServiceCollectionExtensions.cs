@@ -7,6 +7,49 @@ namespace QueueTi.Extensions;
 
 public static class ServiceCollectionExtensions
 {
+    public static IServiceCollection AddQueueTiAdminClient(
+        this IServiceCollection services,
+        string baseUrl,
+        Action<QueueTiClientOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new QueueTiClientOptions();
+        configure(options);
+
+        TokenStore? sharedTokenStore = null;
+        if (options.BearerToken is not null)
+        {
+            sharedTokenStore = new TokenStore(options.BearerToken);
+        }
+
+        var capturedStore = sharedTokenStore;
+        var httpClientBuilder = services.AddHttpClient("QueueTiAdmin", client =>
+        {
+            client.BaseAddress = new Uri(baseUrl);
+        });
+
+        if (capturedStore is not null)
+        {
+            httpClientBuilder.AddHttpMessageHandler(() => new BearerTokenHandler(capturedStore));
+        }
+
+        options.ConfigureHttpClientBuilder?.Invoke(httpClientBuilder);
+
+        var capturedOptions = options;
+        services.AddSingleton(sp =>
+        {
+            var factory = sp.GetRequiredService<IHttpClientFactory>();
+            var loggerFactory = sp.GetService<ILoggerFactory>();
+            var httpClient = factory.CreateClient("QueueTiAdmin");
+            return new AdminClient(httpClient, capturedOptions, capturedStore, ownsHttpClient: false, loggerFactory);
+        });
+
+        return services;
+    }
+
     public static IServiceCollection AddQueueTiClient(
         this IServiceCollection services,
         string address,
