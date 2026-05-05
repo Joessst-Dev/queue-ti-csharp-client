@@ -126,6 +126,104 @@ app.MapPost("/orders", async (QueueTiClient client) =>
 });
 ```
 
+## .NET Aspire Integration
+
+The `QueueTi.Aspire.Hosting` and `QueueTi.Client.Aspire` packages provide seamless integration with .NET Aspire orchestration for both AppHost and service projects.
+
+### Installation
+
+Each package targets a different project in your Aspire solution:
+
+**AppHost project:**
+```bash
+dotnet add package QueueTi.Aspire.Hosting
+```
+
+**Service/worker project:**
+```bash
+dotnet add package QueueTi.Client.Aspire
+```
+
+### AppHost Setup
+
+Use `AddQueueTi()` to register QueueTi as a distributed application resource in your AppHost:
+
+```csharp
+// Program.cs (Aspire AppHost project)
+var builder = DistributedApplication.CreateBuilder(args);
+
+var postgres = builder.AddPostgres("postgres")
+    .AddDatabase("queueti-db");
+
+var queue = builder.AddQueueTi("queue")
+    .WithNpgsqlDatabase(postgres)
+    .WithAuthentication(
+        username: "admin",
+        password: builder.AddParameter("queue-password", secret: true),
+        jwtSecret: builder.AddParameter("queue-jwt-secret", secret: true))
+    .WithLogLevel("info");
+
+builder.AddProject<Projects.MyWorker>("worker")
+    .WithReference(queue);
+
+builder.Build().Run();
+```
+
+**Key builder methods:**
+
+| Method | Purpose |
+|--------|---------|
+| `AddQueueTi(name, grpcPort?, httpPort?, tag?)` | Adds a QueueTi container resource. Pulls `ghcr.io/joessst-dev/queue-ti`. Endpoints: `grpc` (target 50051), `http` (target 8080). |
+| `WithNpgsqlDatabase(database)` | Wires an Npgsql database resource. Sets `QUEUETI_DB_*` env vars and adds `WaitFor` dependency. |
+| `WithAuthentication(username, password, jwtSecret)` | Configures authentication. Sets `QUEUETI_AUTH_ENABLED` and related env vars from `ParameterResource` values. |
+| `WithLogLevel(level)` | Sets `QUEUETI_LOG_LEVEL`. |
+
+### Service Project Setup
+
+In your worker or web project, call `AddQueueTiClient()` to register the gRPC client:
+
+```csharp
+// Program.cs (Service project)
+builder.AddQueueTiClient("queue");
+
+var app = builder.Build();
+app.Run();
+```
+
+The client automatically:
+- Reads the connection string from `ConnectionStrings:queue` (set by Aspire).
+- Registers `QueueTiClient` in DI (and the underlying `QueueService.QueueServiceClient`).
+- Configures health checks (HTTP GET to `/healthz` on port 8080).
+- Instruments outbound gRPC calls with OpenTelemetry tracing.
+
+**With custom settings:**
+
+```csharp
+builder.AddQueueTiClient("queue", settings =>
+{
+    settings.DisableHealthChecks = true; // if health checks are managed separately
+    settings.BearerToken = "your-jwt";   // if auth is enabled on the server
+});
+```
+
+### QueueTiClientSettings
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ConnectionString` | `string?` | `null` | Explicit connection string. If not set, read from `ConnectionStrings:{connectionName}` or `QueueTi:{connectionName}` config. |
+| `DisableHealthChecks` | `bool` | `false` | Disable automatic health check registration. |
+| `DisableTracing` | `bool` | `false` | Disable OpenTelemetry instrumentation. |
+| `BearerToken` | `string?` | `null` | Optional bearer token for authentication. |
+| `TokenRefresher` | `Func<CancellationToken, Task<string>>?` | `null` | Optional callback to refresh the bearer token at runtime. |
+
+### Health Checks
+
+When `DisableHealthChecks` is false (default), the integration registers an HTTP health check that probes `GET /healthz` on the QueueTi service's HTTP port (default 8080). The check is registered under tags `live` and `queueti` and requires no authentication.
+
+### Distributed Tracing
+
+When `DisableTracing` is false (default), all outbound gRPC calls are instrumented using `OpenTelemetry.Instrumentation.GrpcNetClient`. Traces are exported via the Aspire telemetry pipeline.
+
 ## Publishing Messages
 
 Create a producer and call `PublishAsync()`:

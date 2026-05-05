@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="QueueTi.Aspire.Hosting/QueueTi.Aspire.Hosting.csproj" />
+  <Project Path="QueueTi.Client.Aspire/QueueTi.Client.Aspire.csproj" />
   <Project Path="QueueTi.Client.Tests/QueueTi.Client.Tests.csproj" />
   <Project Path="QueueTi.Client/QueueTi.Client.csproj" />
 </Solution>
