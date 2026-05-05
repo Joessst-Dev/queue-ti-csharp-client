@@ -136,6 +136,16 @@ public static class QueueTiResourceBuilderExtensions
             });
     }
 
+    public static IResourceBuilder<QueueTiResource> WithReplicas(
+        this IResourceBuilder<QueueTiResource> builder,
+        int replicas)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentOutOfRangeException.ThrowIfLessThan(replicas, 1);
+
+        return builder.WithAnnotation(new ReplicaAnnotation(replicas));
+    }
+
     public static IResourceBuilder<QueueTiResource> WithAuthentication(
         this IResourceBuilder<QueueTiResource> builder,
         string username,
