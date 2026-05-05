@@ -1,19 +1,15 @@
 # QueueTi C# Client
 
-A proto-first gRPC client library for the [QueueTi](https://github.com/queue-ti/queue-ti) distributed message queue service. Targets `.NET 10.0`.
+A proto-first gRPC client library for the [QueueTi](https://github.com/Joessst-Dev/queue-ti) distributed message queue service. Targets `.NET 10.0`.
 
 ## Installation
 
-The `QueueTi.Client` package is available on NuGet. Install it using your preferred method:
+> **Note:** The package has not yet been published to NuGet. To use it now, clone the repository and add a project reference, or build the package locally with `dotnet pack QueueTi.Client/`.
+
+Once published, it will be installable via:
 
 ```bash
 dotnet add package QueueTi.Client
-```
-
-Or with the Package Manager:
-
-```powershell
-Install-Package QueueTi.Client
 ```
 
 ## Quick Start
@@ -32,6 +28,8 @@ var client = QueueTiClient.Create("https://queue.example.com", new QueueTiClient
 ### Publish a message
 
 ```csharp
+using System.Text;
+
 var producer = client.NewProducer();
 
 string messageId = await producer.PublishAsync(
@@ -81,15 +79,21 @@ var client = QueueTiClient.Create("https://queue.example.com", new QueueTiClient
 
 ### Manual channel (advanced)
 
-If you need full control over the gRPC channel, pass your own `QueueService.QueueServiceClient`:
+If you need full control over the gRPC channel, pass your own `QueueService.QueueServiceClient`. In this path you are responsible for wiring any interceptors — `BearerToken` is not automatically applied:
 
 ```csharp
 var channel = GrpcChannel.ForAddress("https://queue.example.com");
 var grpcClient = new QueueService.QueueServiceClient(channel);
-var client = new QueueTiClient(grpcClient, new QueueTiClientOptions
-{
-    BearerToken = "jwt-token"
-});
+var client = new QueueTiClient(grpcClient, new QueueTiClientOptions());
+```
+
+To add bearer auth on a manual channel, intercept the invoker yourself:
+
+```csharp
+var store = new TokenStore("jwt-token");
+var invoker = channel.Intercept(new BearerTokenInterceptor(store));
+var grpcClient = new QueueService.QueueServiceClient(invoker);
+var client = new QueueTiClient(grpcClient, new QueueTiClientOptions());
 ```
 
 ## Dependency Injection (ASP.NET Core)
@@ -162,17 +166,9 @@ var consumer = client.NewConsumer("orders", new ConsumerOptions
 
 await consumer.ConsumeAsync(async (msg, ct) =>
 {
-    try
-    {
-        var orderData = JsonSerializer.Deserialize<Order>(msg.Payload);
-        await BillingService.ProcessAsync(orderData, ct);
-        // Automatically acked on handler return
-    }
-    catch (Exception ex)
-    {
-        // Automatically nacked with exception message on throw
-        throw;
-    }
+    var orderData = JsonSerializer.Deserialize<Order>(msg.Payload);
+    await BillingService.ProcessAsync(orderData, ct);
+    // Automatically acked on return; automatically nacked if an exception is thrown.
 }, ct);
 ```
 
@@ -294,7 +290,7 @@ var client = QueueTiClient.Create(address, new QueueTiClientOptions
 - The refresh task runs in the background and calls the refresher ~60 seconds before token expiry.
 - On refresh success, the new token is stored and used for all subsequent requests.
 - On refresh failure, the task retries with exponential backoff (5 s → 60 s) until success.
-- Refresh runs until the client is disposed or cancellation is requested.
+- Refresh runs until the client is disposed.
 
 ### Update token at runtime
 
@@ -351,9 +347,10 @@ Token refresh failures are logged and retried with exponential backoff. If refre
 
 ## Thread Safety
 
-- `QueueTiClient` and its producers/consumers are **not** thread-safe internally; however, the library is designed for concurrent use via multiple `ConsumeAsync` tasks or separate producer/consumer instances.
+- `QueueTiClient` is safe to share across threads. `TokenStore` uses `ReaderWriterLockSlim` internally and disposal is guarded by an atomic flag.
+- `Producer` and `Consumer` are stateless wrappers; they are safe to use concurrently from multiple tasks.
 - `SetToken()` is thread-safe and updates the interceptor state immediately.
-- `Dispose()` and `DisposeAsync()` are thread-safe (idempotent).
+- `Dispose()` and `DisposeAsync()` are thread-safe and idempotent.
 
 ## Logging
 
