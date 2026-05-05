@@ -617,6 +617,33 @@ When created via `AdminClient.Create`, the client owns the underlying `HttpClien
 
 ## Bearer Token Authentication
 
+### Obtaining a token
+
+Use `QueueTiAuth` to check whether the server requires authentication and to log in:
+
+```csharp
+using QueueTi;
+
+const string HttpAddress = "http://queue.example.com:8080";  // REST API
+const string GrpcAddress = "http://queue.example.com:50051"; // gRPC
+
+string? bearerToken = null;
+
+if (await QueueTiAuth.GetAuthRequiredAsync(HttpAddress))
+{
+    bearerToken = await QueueTiAuth.LoginAsync(HttpAddress, username: "admin", password: "secret");
+}
+
+var client = QueueTiClient.Create(GrpcAddress, new QueueTiClientOptions
+{
+    BearerToken = bearerToken  // null when auth is disabled
+});
+```
+
+Both methods accept an `insecure` flag (set `true` for plain `http://` endpoints) and an optional `CancellationToken`.
+
+`LoginAsync` throws `HttpRequestException` on a non-2xx response (e.g., 401 Unauthorized) and `InvalidOperationException` if the server response is missing the `token` field.
+
 ### Static token
 
 Provide a bearer token at client creation:
@@ -736,6 +763,31 @@ dotnet run
 ```
 
 The AppHost orchestrates Postgres, Redis, and QueueTi containers locally, then runs the producer and consumer services.
+
+### Standalone examples
+
+The `examples/` directory contains self-contained console apps that run against a local QueueTi instance with no Aspire dependency.
+
+**`examples/OrderPipeline/`** — end-to-end producer → consumer → DLQ lifecycle:
+
+- Checks for auth and logs in via `QueueTiAuth` if required.
+- Upserts topic config (`Replayable: false`) and registers the consumer group.
+- Publishes five orders; `ord-003` carries `type=poison` metadata.
+- Runs the streaming consumer (`Concurrency = 3`, `VisibilityTimeoutSeconds = 5`) and a DLQ monitor **concurrently** via `Task.WhenAll`.
+- The DLQ monitor polls for registration until the `orders.dlq` topic exists (created server-side on first dead-letter), then drains it in 5-second batch windows.
+- Both loops stop cleanly on Ctrl+C.
+
+To run it against a local QueueTi instance (see the [QueueTi server repo](https://github.com/Joessst-Dev/queue-ti) for setup):
+
+```bash
+dotnet run --project examples/OrderPipeline/
+```
+
+Credentials default to `admin` / `secret` (the docker-compose defaults). Override via environment variables:
+
+```bash
+QUEUETI_USERNAME=myuser QUEUETI_PASSWORD=mypass dotnet run --project examples/OrderPipeline/
+```
 
 ## Thread Safety
 
