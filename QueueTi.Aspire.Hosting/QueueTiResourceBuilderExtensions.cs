@@ -143,7 +143,7 @@ public static class QueueTiResourceBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentOutOfRangeException.ThrowIfLessThan(replicas, 1);
 
-        return builder.WithAnnotation(new ReplicaAnnotation(replicas));
+        return builder.WithAnnotation(new ReplicaAnnotation(replicas), ResourceAnnotationMutationBehavior.Replace);
     }
 
     public static IResourceBuilder<QueueTiResource> WithAuthentication(
