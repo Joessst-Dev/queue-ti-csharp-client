@@ -25,15 +25,15 @@ await using var admin = AdminClient.Create(HttpAddress, clientOptions);
 Console.WriteLine($"[setup] Configuring topic '{Topic}' (MaxRetries=2)...");
 await admin.UpsertTopicConfigAsync(Topic, new TopicConfig(Topic, Replayable: false, MaxRetries: 2), cts.Token);
 
-// Register consumer groups
-Console.WriteLine("[setup] Registering consumer groups...");
+// Register the main consumer group up-front; DLQ group is registered after consuming
+// because the DLQ topic may not exist until the first message is dead-lettered.
+Console.WriteLine("[setup] Registering consumer group...");
 await RegisterGroupAsync(admin, Topic, ConsumerGroup, cts.Token);
-await RegisterGroupAsync(admin, DlqTopic, DlqConsumerGroup, cts.Token);
 
 // Publish 5 orders — order #3 is a poison pill
 Console.WriteLine("\n[producer] Publishing 5 orders...");
 var producer = client.NewProducer();
-await PublishOrdersAsync(producer, cts.Token);
+await PublishOrdersAsync(producer, Topic, cts.Token);
 
 // Stream-consume with concurrency=3; handler throws on poison → auto-nack
 Console.WriteLine("\n[consumer] Consuming orders (Ctrl+C to stop)...");
@@ -44,8 +44,9 @@ var consumer = client.NewConsumer(Topic, new ConsumerOptions
 });
 await consumer.ConsumeAsync(HandleOrderAsync, cts.Token);
 
-// Drain dead-lettered messages from the DLQ
-Console.WriteLine("\n[dlq] Draining DLQ...");
+// Register the DLQ consumer group now that the topic exists, then drain
+Console.WriteLine("\n[dlq] Registering DLQ consumer group and draining...");
+await RegisterGroupAsync(admin, DlqTopic, DlqConsumerGroup, CancellationToken.None);
 var dlqConsumer = client.NewConsumer(DlqTopic, new ConsumerOptions { ConsumerGroup = DlqConsumerGroup });
 await DrainDlqAsync(dlqConsumer);
 
@@ -66,7 +67,7 @@ static async Task RegisterGroupAsync(AdminClient admin, string topic, string gro
     }
 }
 
-static async Task PublishOrdersAsync(Producer producer, CancellationToken ct)
+static async Task PublishOrdersAsync(Producer producer, string topic, CancellationToken ct)
 {
     var orders = new[]
     {
@@ -93,7 +94,7 @@ static async Task PublishOrdersAsync(Producer producer, CancellationToken ct)
             metadata["type"] = "poison";
         }
 
-        var id = await producer.PublishAsync(Topic, payload, new PublishOptions { Metadata = metadata }, ct);
+        var id = await producer.PublishAsync(topic, payload, new PublishOptions { Metadata = metadata }, ct);
         Console.WriteLine($"         {orderId}{(poison ? " [POISON]" : "")} → {id}");
     }
 }
@@ -115,7 +116,9 @@ static async Task HandleOrderAsync(QueueTiMessage msg, CancellationToken ct)
 
 static async Task DrainDlqAsync(Consumer dlqConsumer)
 {
-    using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    // Start with a 10 s window; tighten to 2 s after the first batch lands so
+    // we don't time out before the server delivers dead-lettered messages.
+    using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
     var count = 0;
 
     await dlqConsumer.ConsumeBatchAsync(10, async (batch, ct) =>
@@ -125,7 +128,7 @@ static async Task DrainDlqAsync(Consumer dlqConsumer)
             var orderId = msg.Metadata.GetValueOrDefault("order-id", msg.Id);
             Console.WriteLine($"[dlq]      ACK  {orderId} (retries: {msg.RetryCount})");
             await msg.AckAsync(ct);
-            count++;
+            Interlocked.Increment(ref count);
         }
         drainCts.CancelAfter(TimeSpan.FromSeconds(2));
     }, drainCts.Token);
