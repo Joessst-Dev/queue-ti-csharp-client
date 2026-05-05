@@ -184,6 +184,21 @@ builder.Build().Run();
 | `WithAuthentication(username, password, jwtSecret)` | Configures authentication. Sets `QUEUETI_AUTH_ENABLED` and related env vars from `ParameterResource` values. |
 | `WithLogLevel(level)` | Sets `QUEUETI_LOG_LEVEL`. |
 
+### Replicas
+
+`WithReplicas(n)` starts `n` identical QueueTi container instances. Aspire automatically load-balances `WithReference` connections across them, so service projects receive a connection string that round-robins between replicas without any extra configuration.
+
+All replicas share the same database and Redis resources — wire those once on the resource builder and each instance picks up the same env vars:
+
+```csharp
+var queue = builder.AddQueueTi("queue")
+    .WithReplicas(3)
+    .WithNpgsqlDatabase(postgres)
+    .WithRedis(redis);
+```
+
+> **Note:** `WithReplicas` sets a fixed count at startup. For dynamic scaling based on load, configure scaling rules at the deployment target (Azure Container Apps, Kubernetes HPA) rather than in the AppHost.
+
 ### Service Project Setup
 
 In your worker or web project, call `AddQueueTiClient()` to register the gRPC client:
