@@ -6,8 +6,8 @@ on:
       - 'v*.*.*'
 
 jobs:
-  build-and-test:
-    name: Build and Test
+  build-test-pack:
+    name: Build, Test and Pack
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up .NET 10
         uses: actions/setup-dotnet@v4
@@ -47,36 +49,6 @@ jobs:
           path: '**/TestResults/**/*.trx'
           retention-days: 7
 
-  publish:
-    name: Pack and Publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: build-and-test
-
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
-          restore-keys: ${{ runner.os }}-nuget-
-
-      - name: Restore dependencies
-        run: dotnet restore QueueTi.slnx
-
       - name: Resolve version from tag
         id: version
         run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -85,9 +57,38 @@ jobs:
         run: >
           dotnet pack QueueTi.Client/
           --configuration Release
+          --no-build
           --no-restore
           -p:Version=${{ steps.version.outputs.value }}
           --output ./nupkg
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: ./nupkg/*.nupkg
+          retention-days: 1
+
+  publish:
+    name: Publish to NuGet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: build-test-pack
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: ./nupkg
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Publish to NuGet
         run: >
