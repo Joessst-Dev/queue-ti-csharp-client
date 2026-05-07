@@ -85,4 +85,25 @@ public sealed class TlsOptionsTests
         Assert.IsType<ArgumentException>(ex);
         Assert.Contains("PrivateKey and CertificateChain", ex!.Message);
     }
+
+    [Fact]
+    public void AdminClient_Create_GivenOnlyPrivateKeyWithoutCertChain_ShouldThrow()
+    {
+        // Arrange (Given)
+        var options = new QueueTiClientOptions
+        {
+            Tls = new TlsOptions
+            {
+                PrivateKey = new byte[] { 1 },
+                CertificateChain = null,
+            },
+        };
+
+        // Act (When)
+        var ex = Record.Exception(() => AdminClient.Create("https://localhost", options));
+
+        // Assert (Then)
+        Assert.IsType<ArgumentException>(ex);
+        Assert.Contains("PrivateKey and CertificateChain", ex!.Message);
+    }
 }

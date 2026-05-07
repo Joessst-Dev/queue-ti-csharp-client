@@ -73,7 +73,7 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
 
         if (options.Tls is not null)
         {
-            channelOptions.HttpHandler = BuildTlsHandler(options.Tls);
+            channelOptions.HttpHandler = TlsHandlerFactory.Build(options.Tls);
         }
 
         options.ConfigureChannel?.Invoke(channelOptions);
@@ -113,57 +113,6 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
         }
 
         _tokenStore.Set(token);
-    }
-
-    private static SocketsHttpHandler BuildTlsHandler(TlsOptions tls)
-    {
-        if ((tls.PrivateKey is null) != (tls.CertificateChain is null))
-        {
-            throw new ArgumentException(
-                "TlsOptions: PrivateKey and CertificateChain must both be set for mTLS, or neither.");
-        }
-
-        var handler = new SocketsHttpHandler();
-        var sslOptions = new System.Net.Security.SslClientAuthenticationOptions();
-
-        if (tls.RootCertificates is not null)
-        {
-            var caCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(
-                System.Text.Encoding.UTF8.GetString(tls.RootCertificates));
-
-            sslOptions.RemoteCertificateValidationCallback = (_, cert, chain, _) =>
-            {
-                if (cert is null || chain is null)
-                {
-                    return false;
-                }
-                chain.ChainPolicy.TrustMode =
-                    System.Security.Cryptography.X509Certificates.X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.Add(caCert);
-                return chain.Build(
-                    (System.Security.Cryptography.X509Certificates.X509Certificate2)cert);
-            };
-        }
-
-        if (tls.PrivateKey is not null && tls.CertificateChain is not null)
-        {
-            var clientCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(
-                System.Text.Encoding.UTF8.GetString(tls.CertificateChain),
-                System.Text.Encoding.UTF8.GetString(tls.PrivateKey));
-
-            sslOptions.ClientCertificates = new System.Security.Cryptography.X509Certificates.X509CertificateCollection
-            {
-                clientCert
-            };
-        }
-
-        if (tls.ServerNameOverride is not null)
-        {
-            sslOptions.TargetHost = tls.ServerNameOverride;
-        }
-
-        handler.SslOptions = sslOptions;
-        return handler;
     }
 
     public void Dispose()
