@@ -662,7 +662,7 @@ var client = QueueTiClient.Create("https://192.168.1.100:50051", new QueueTiClie
 {
     Tls = new TlsOptions
     {
-        RootCertificates   = await File.ReadAllBytesAsync("/path/to/ca.pem"),
+        RootCertificates = await File.ReadAllBytesAsync("/path/to/ca.pem"),
         ServerNameOverride = "queue.internal",
     },
 });
