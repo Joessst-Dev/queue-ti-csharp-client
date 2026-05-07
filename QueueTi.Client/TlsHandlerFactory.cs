@@ -16,41 +16,50 @@ internal static class TlsHandlerFactory
 
         var ownedCerts = new List<X509Certificate2>();
         var inner = new SocketsHttpHandler();
-        var sslOptions = new SslClientAuthenticationOptions();
-
-        if (tls.RootCertificates is not null)
+        try
         {
-            var caCert = X509Certificate2.CreateFromPem(Encoding.UTF8.GetString(tls.RootCertificates));
-            ownedCerts.Add(caCert);
+            var sslOptions = new SslClientAuthenticationOptions();
 
-            sslOptions.RemoteCertificateValidationCallback = (_, cert, chain, _) =>
+            if (tls.RootCertificates is not null)
             {
-                if (cert is not X509Certificate2 serverCert || chain is null)
+                var caCert = X509Certificate2.CreateFromPem(Encoding.UTF8.GetString(tls.RootCertificates));
+                ownedCerts.Add(caCert);
+
+                sslOptions.RemoteCertificateValidationCallback = (_, cert, chain, _) =>
                 {
-                    return false;
-                }
-                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.Add(caCert);
-                return chain.Build(serverCert);
-            };
-        }
+                    if (cert is not X509Certificate2 serverCert || chain is null)
+                    {
+                        return false;
+                    }
+                    chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                    chain.ChainPolicy.CustomTrustStore.Add(caCert);
+                    return chain.Build(serverCert);
+                };
+            }
 
-        if (tls.PrivateKey is not null && tls.CertificateChain is not null)
+            if (tls.PrivateKey is not null && tls.CertificateChain is not null)
+            {
+                var clientCert = X509Certificate2.CreateFromPem(
+                    Encoding.UTF8.GetString(tls.CertificateChain),
+                    Encoding.UTF8.GetString(tls.PrivateKey));
+                ownedCerts.Add(clientCert);
+                sslOptions.ClientCertificates = new X509CertificateCollection { clientCert };
+            }
+
+            if (tls.ServerNameOverride is not null)
+            {
+                sslOptions.TargetHost = tls.ServerNameOverride;
+            }
+
+            inner.SslOptions = sslOptions;
+            return new OwnedCertsHandler(inner, ownedCerts);
+        }
+        catch
         {
-            var clientCert = X509Certificate2.CreateFromPem(
-                Encoding.UTF8.GetString(tls.CertificateChain),
-                Encoding.UTF8.GetString(tls.PrivateKey));
-            ownedCerts.Add(clientCert);
-            sslOptions.ClientCertificates = new X509CertificateCollection { clientCert };
+            foreach (var cert in ownedCerts) cert.Dispose();
+            inner.Dispose();
+            throw;
         }
-
-        if (tls.ServerNameOverride is not null)
-        {
-            sslOptions.TargetHost = tls.ServerNameOverride;
-        }
-
-        inner.SslOptions = sslOptions;
-        return new OwnedCertsHandler(inner, ownedCerts);
     }
 
     private sealed class OwnedCertsHandler(SocketsHttpHandler inner, List<X509Certificate2> ownedCerts)

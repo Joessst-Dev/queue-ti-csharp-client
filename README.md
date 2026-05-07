@@ -644,9 +644,9 @@ var client = QueueTiClient.Create("https://queue.example.com:50051", new QueueTi
 {
     Tls = new TlsOptions
     {
-        RootCertificates  = await File.ReadAllBytesAsync("/path/to/ca.pem"),
-        CertificateChain  = await File.ReadAllBytesAsync("/path/to/client-cert.pem"),
-        PrivateKey        = await File.ReadAllBytesAsync("/path/to/client-key.pem"),
+        RootCertificates = await File.ReadAllBytesAsync("/path/to/ca.pem"),
+        CertificateChain = await File.ReadAllBytesAsync("/path/to/client-cert.pem"),
+        PrivateKey = await File.ReadAllBytesAsync("/path/to/client-key.pem"),
     },
 });
 ```
