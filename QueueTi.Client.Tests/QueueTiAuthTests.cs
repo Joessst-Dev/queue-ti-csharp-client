@@ -31,8 +31,10 @@ public sealed class QueueTiAuthTests
         return (host.GetTestServer().CreateClient(), host);
     }
 
+    // ── FetchTokenAsync ─────────────────────────────────────────────────────────
+
     [Fact]
-    public async Task LoginAsync_GivenValidCredentials_ShouldReturnToken()
+    public async Task FetchTokenAsync_GivenValidCredentials_ShouldReturnToken()
     {
         // Arrange (Given)
         string? capturedUsername = null;
@@ -52,7 +54,7 @@ public sealed class QueueTiAuthTests
         });
 
         // Act (When)
-        var token = await QueueTiAuth.LoginAsync(http, "admin", "secret");
+        var token = await QueueTiAuth.FetchTokenAsync(http, "admin", "secret");
 
         // Assert (Then)
         Assert.Equal("test-jwt-token", token);
@@ -64,7 +66,7 @@ public sealed class QueueTiAuthTests
     }
 
     [Fact]
-    public async Task LoginAsync_GivenUnauthorizedResponse_ShouldThrow()
+    public async Task FetchTokenAsync_GivenUnauthorizedResponse_ShouldThrow()
     {
         // Arrange (Given)
         var (http, host) = await BuildAsync(ep =>
@@ -78,14 +80,14 @@ public sealed class QueueTiAuthTests
 
         // Act & Assert (When & Then)
         await Assert.ThrowsAsync<HttpRequestException>(
-            () => QueueTiAuth.LoginAsync(http, "admin", "wrong"));
+            () => QueueTiAuth.FetchTokenAsync(http, "admin", "wrong"));
 
         await host.StopAsync();
         host.Dispose();
     }
 
     [Fact]
-    public async Task LoginAsync_GivenResponseWithoutTokenField_ShouldThrowInvalidOperationException()
+    public async Task FetchTokenAsync_GivenResponseWithoutTokenField_ShouldThrowInvalidOperationException()
     {
         // Arrange (Given)
         var (http, host) = await BuildAsync(ep =>
@@ -99,12 +101,109 @@ public sealed class QueueTiAuthTests
 
         // Act & Assert (When & Then)
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => QueueTiAuth.LoginAsync(http, "admin", "admin"));
+            () => QueueTiAuth.FetchTokenAsync(http, "admin", "admin"));
         Assert.Contains("token", ex.Message);
 
         await host.StopAsync();
         host.Dispose();
     }
+
+    // ── LoginAsync (session) ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task LoginAsync_GivenAuthDisabled_ShouldReturnNoOpSession()
+    {
+        // Arrange (Given)
+        var (http, host) = await BuildAsync(ep =>
+        {
+            ep.MapGet("/api/auth/status", async ctx =>
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"auth_required":false}""");
+            });
+        });
+
+        // Act (When)
+        var session = await QueueTiAuth.LoginAsync(http, "admin", "secret",
+            refresher: _ => Task.FromResult("should-not-be-called"));
+
+        // Assert (Then)
+        Assert.Null(session.Token);
+        Assert.NotNull(session.RefreshAsync);
+        var refreshed = await session.RefreshAsync(CancellationToken.None);
+        Assert.Equal(string.Empty, refreshed);
+
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    [Fact]
+    public async Task LoginAsync_GivenAuthEnabled_ShouldReturnSessionWithToken()
+    {
+        // Arrange (Given)
+        var (http, host) = await BuildAsync(ep =>
+        {
+            ep.MapGet("/api/auth/status", async ctx =>
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"auth_required":true}""");
+            });
+
+            ep.MapPost("/api/auth/login", async ctx =>
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"token":"test-jwt-token"}""");
+            });
+        });
+
+        // Act (When)
+        var session = await QueueTiAuth.LoginAsync(http, "admin", "secret",
+            refresher: async ct => await QueueTiAuth.FetchTokenAsync(http, "admin", "secret", ct));
+
+        // Assert (Then)
+        Assert.Equal("test-jwt-token", session.Token);
+        Assert.NotNull(session.RefreshAsync);
+
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    [Fact]
+    public async Task LoginAsync_GivenAuthEnabled_RefreshAsyncShouldFetchNewToken()
+    {
+        // Arrange (Given)
+        var callCount = 0;
+        var (http, host) = await BuildAsync(ep =>
+        {
+            ep.MapGet("/api/auth/status", async ctx =>
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("""{"auth_required":true}""");
+            });
+
+            ep.MapPost("/api/auth/login", async ctx =>
+            {
+                callCount++;
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync($$$"""{"token":"token-call-{{{callCount}}}"}""");
+            });
+        });
+
+        var session = await QueueTiAuth.LoginAsync(http, "admin", "secret",
+            refresher: async ct => await QueueTiAuth.FetchTokenAsync(http, "admin", "secret", ct));
+
+        // Act (When)
+        var refreshedToken = await session.RefreshAsync(CancellationToken.None);
+
+        // Assert (Then)
+        Assert.Equal("token-call-1", session.Token);
+        Assert.Equal("token-call-2", refreshedToken);
+
+        await host.StopAsync();
+        host.Dispose();
+    }
+
+    // ── GetAuthRequiredAsync ────────────────────────────────────────────────────
 
     [Fact]
     public async Task GetAuthRequiredAsync_GivenAuthEnabled_ShouldReturnTrue()

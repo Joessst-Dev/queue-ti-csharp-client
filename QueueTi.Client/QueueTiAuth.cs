@@ -15,7 +15,7 @@ public static class QueueTiAuth
         return await GetAuthRequiredAsync(http, ct);
     }
 
-    public static async Task<string> LoginAsync(
+    public static async Task<QueueTiAuthSession> LoginAsync(
         string baseUrl,
         string username,
         string password,
@@ -27,7 +27,13 @@ public static class QueueTiAuth
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
 
         using var http = BuildHttpClient(baseUrl, insecure);
-        return await LoginAsync(http, username, password, ct);
+        return await LoginAsync(http, username, password,
+            refresher: async ct2 =>
+            {
+                using var freshHttp = BuildHttpClient(baseUrl, insecure);
+                return await FetchTokenAsync(freshHttp, username, password, ct2);
+            },
+            ct);
     }
 
     internal static async Task<bool> GetAuthRequiredAsync(
@@ -42,7 +48,28 @@ public static class QueueTiAuth
         return doc.RootElement.TryGetProperty("auth_required", out var prop) && prop.GetBoolean();
     }
 
-    internal static async Task<string> LoginAsync(
+    internal static async Task<QueueTiAuthSession> LoginAsync(
+        HttpClient http,
+        string username,
+        string password,
+        Func<CancellationToken, Task<string>> refresher,
+        CancellationToken ct = default)
+    {
+        if (!await GetAuthRequiredAsync(http, ct))
+        {
+            return QueueTiAuthSession.NoOp;
+        }
+
+        var token = await FetchTokenAsync(http, username, password, ct);
+
+        return new QueueTiAuthSession
+        {
+            Token = token,
+            RefreshAsync = refresher,
+        };
+    }
+
+    internal static async Task<string> FetchTokenAsync(
         HttpClient http,
         string username,
         string password,
