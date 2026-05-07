@@ -58,11 +58,22 @@ public sealed class QueueTiClient : IDisposable, IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(address);
         ArgumentNullException.ThrowIfNull(options);
 
+        if (options.Insecure && options.Tls is not null)
+        {
+            throw new ArgumentException(
+                "QueueTiClientOptions: Insecure and Tls are mutually exclusive.");
+        }
+
         var channelOptions = new GrpcChannelOptions();
 
         if (options.Insecure)
         {
             channelOptions.Credentials = Grpc.Core.ChannelCredentials.Insecure;
+        }
+
+        if (options.Tls is not null)
+        {
+            channelOptions.HttpHandler = TlsHandlerFactory.Build(options.Tls);
         }
 
         options.ConfigureChannel?.Invoke(channelOptions);

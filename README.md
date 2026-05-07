@@ -615,6 +615,70 @@ admin.Dispose();
 
 When created via `AdminClient.Create`, the client owns the underlying `HttpClient` and disposes it on cleanup. When constructed with `new AdminClient(httpClient)` or resolved from DI via `AddQueueTiAdminClient`, the caller or the `IHttpClientFactory` owns the `HttpClient` — the client will not dispose it.
 
+## TLS Configuration
+
+`TlsOptions` controls server certificate validation, mutual TLS, and SNI hostname override for both `QueueTiClient` and `AdminClient`. It is mutually exclusive with `Insecure`.
+
+When `Tls` is not set and `Insecure` is false (the default), the system trust store is used with no further configuration required.
+
+### Custom CA certificate
+
+Use a custom CA for self-signed or internal PKI servers:
+
+```csharp
+var client = QueueTiClient.Create("https://queue.example.com:50051", new QueueTiClientOptions
+{
+    Tls = new TlsOptions
+    {
+        RootCertificates = await File.ReadAllBytesAsync("/path/to/ca.pem"),
+    },
+});
+```
+
+### Mutual TLS (mTLS)
+
+Provide both a client certificate chain and private key for mTLS authentication:
+
+```csharp
+var client = QueueTiClient.Create("https://queue.example.com:50051", new QueueTiClientOptions
+{
+    Tls = new TlsOptions
+    {
+        RootCertificates = await File.ReadAllBytesAsync("/path/to/ca.pem"),
+        CertificateChain = await File.ReadAllBytesAsync("/path/to/client-cert.pem"),
+        PrivateKey = await File.ReadAllBytesAsync("/path/to/client-key.pem"),
+    },
+});
+```
+
+`CertificateChain` and `PrivateKey` must be supplied together — providing only one throws `ArgumentException`.
+
+### Server name override
+
+Use a different SNI hostname than the connection address (e.g., for self-signed certs with a fixed CN):
+
+```csharp
+var client = QueueTiClient.Create("https://192.168.1.100:50051", new QueueTiClientOptions
+{
+    Tls = new TlsOptions
+    {
+        RootCertificates = await File.ReadAllBytesAsync("/path/to/ca.pem"),
+        ServerNameOverride = "queue.internal",
+    },
+});
+```
+
+`TlsOptions` applies identically to `AdminClient.Create`.
+
+### TlsOptions reference
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `RootCertificates` | `byte[]?` | PEM-encoded CA certificate(s). `null` uses the system trust store. |
+| `CertificateChain` | `byte[]?` | PEM-encoded client certificate chain for mTLS. Requires `PrivateKey`. |
+| `PrivateKey` | `byte[]?` | PEM-encoded client private key for mTLS. Requires `CertificateChain`. |
+| `ServerNameOverride` | `string?` | Hostname sent as TLS SNI and used for certificate verification. |
+
 ## Bearer Token Authentication
 
 ### Obtaining a token

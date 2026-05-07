@@ -55,32 +55,45 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
         ArgumentNullException.ThrowIfNull(options);
 
+        if (options.Insecure && options.Tls is not null)
+        {
+            throw new ArgumentException(
+                "QueueTiClientOptions: Insecure and Tls are mutually exclusive.");
+        }
+
         TokenStore? store = null;
         HttpMessageHandler handler;
 
         if (options.BearerToken is not null)
         {
             store = new TokenStore(options.BearerToken);
-            handler = new BearerTokenHandler(store) { InnerHandler = BuildHttpClientHandler(options) };
+            handler = new BearerTokenHandler(store) { InnerHandler = BuildHttpHandler(options) };
         }
         else
         {
-            handler = BuildHttpClientHandler(options);
+            handler = BuildHttpHandler(options);
         }
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
         return new AdminClient(httpClient, options, store, ownsHttpClient: true, loggerFactory);
     }
 
-    private static HttpClientHandler BuildHttpClientHandler(QueueTiClientOptions options)
+    private static HttpMessageHandler BuildHttpHandler(QueueTiClientOptions options)
     {
-        var handler = new HttpClientHandler();
         if (options.Insecure)
         {
+            var handler = new HttpClientHandler();
             handler.ServerCertificateCustomValidationCallback =
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            return handler;
         }
-        return handler;
+
+        if (options.Tls is not null)
+        {
+            return TlsHandlerFactory.Build(options.Tls);
+        }
+
+        return new HttpClientHandler();
     }
 
     public void SetToken(string token)
