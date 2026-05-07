@@ -683,7 +683,7 @@ var client = QueueTiClient.Create("https://192.168.1.100:50051", new QueueTiClie
 
 ### Obtaining a token
 
-Use `QueueTiAuth` to check whether the server requires authentication and to log in:
+Use `QueueTiAuth.LoginAsync` to log in. It checks whether the server requires authentication internally and returns a `QueueTiAuthSession` with a null-safe `Token` and a `RefreshAsync` delegate:
 
 ```csharp
 using QueueTi;
@@ -691,22 +691,24 @@ using QueueTi;
 const string HttpAddress = "http://queue.example.com:8080";  // REST API
 const string GrpcAddress = "http://queue.example.com:50051"; // gRPC
 
-string? bearerToken = null;
-
-if (await QueueTiAuth.GetAuthRequiredAsync(HttpAddress))
-{
-    bearerToken = await QueueTiAuth.LoginAsync(HttpAddress, username: "admin", password: "secret");
-}
+var auth = await QueueTiAuth.LoginAsync(HttpAddress, username: "admin", password: "secret");
+// auth.Token is null when auth is disabled — QueueTiClient.Create handles null safely (no Authorization header sent)
 
 var client = QueueTiClient.Create(GrpcAddress, new QueueTiClientOptions
 {
-    BearerToken = bearerToken  // null when auth is disabled
+    BearerToken = auth.Token,
+    TokenRefresher = auth.Token is not null ? auth.RefreshAsync : null,
 });
 ```
 
-Both methods accept an `insecure` flag (set `true` for plain `http://` endpoints) and an optional `CancellationToken`.
+`LoginAsync` accepts an `insecure` flag (set `true` for plain `http://` endpoints) and an optional `CancellationToken`. It throws `HttpRequestException` on a non-2xx response (e.g., 401 Unauthorized) and `InvalidOperationException` if the server response is missing the `token` field.
 
-`LoginAsync` throws `HttpRequestException` on a non-2xx response (e.g., 401 Unauthorized) and `InvalidOperationException` if the server response is missing the `token` field.
+**`QueueTiAuthSession` properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Token` | `string?` | The bearer token, or `null` when auth is disabled. |
+| `RefreshAsync` | `Func<CancellationToken, Task<string>>` | Delegate that re-logs in and returns a fresh token. Returns an empty string (no-op) when auth is disabled. |
 
 ### Static token
 
