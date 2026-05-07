@@ -55,31 +55,95 @@ public sealed class AdminClient : IDisposable, IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
         ArgumentNullException.ThrowIfNull(options);
 
+        if (options.Insecure && options.Tls is not null)
+        {
+            throw new ArgumentException(
+                "QueueTiClientOptions: Insecure and Tls are mutually exclusive.");
+        }
+
         TokenStore? store = null;
         HttpMessageHandler handler;
 
         if (options.BearerToken is not null)
         {
             store = new TokenStore(options.BearerToken);
-            handler = new BearerTokenHandler(store) { InnerHandler = BuildHttpClientHandler(options) };
+            handler = new BearerTokenHandler(store) { InnerHandler = BuildHttpHandler(options) };
         }
         else
         {
-            handler = BuildHttpClientHandler(options);
+            handler = BuildHttpHandler(options);
         }
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
         return new AdminClient(httpClient, options, store, ownsHttpClient: true, loggerFactory);
     }
 
-    private static HttpClientHandler BuildHttpClientHandler(QueueTiClientOptions options)
+    private static HttpMessageHandler BuildHttpHandler(QueueTiClientOptions options)
     {
-        var handler = new HttpClientHandler();
         if (options.Insecure)
         {
+            var handler = new HttpClientHandler();
             handler.ServerCertificateCustomValidationCallback =
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            return handler;
         }
+
+        if (options.Tls is not null)
+        {
+            return BuildTlsHandler(options.Tls);
+        }
+
+        return new HttpClientHandler();
+    }
+
+    private static SocketsHttpHandler BuildTlsHandler(TlsOptions tls)
+    {
+        if ((tls.PrivateKey is null) != (tls.CertificateChain is null))
+        {
+            throw new ArgumentException(
+                "TlsOptions: PrivateKey and CertificateChain must both be set for mTLS, or neither.");
+        }
+
+        var handler = new SocketsHttpHandler();
+        var sslOptions = new System.Net.Security.SslClientAuthenticationOptions();
+
+        if (tls.RootCertificates is not null)
+        {
+            var caCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(
+                System.Text.Encoding.UTF8.GetString(tls.RootCertificates));
+
+            sslOptions.RemoteCertificateValidationCallback = (_, cert, chain, _) =>
+            {
+                if (cert is null || chain is null)
+                {
+                    return false;
+                }
+                chain.ChainPolicy.TrustMode =
+                    System.Security.Cryptography.X509Certificates.X509ChainTrustMode.CustomRootTrust;
+                chain.ChainPolicy.CustomTrustStore.Add(caCert);
+                return chain.Build(
+                    (System.Security.Cryptography.X509Certificates.X509Certificate2)cert);
+            };
+        }
+
+        if (tls.PrivateKey is not null && tls.CertificateChain is not null)
+        {
+            var clientCert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(
+                System.Text.Encoding.UTF8.GetString(tls.CertificateChain),
+                System.Text.Encoding.UTF8.GetString(tls.PrivateKey));
+
+            sslOptions.ClientCertificates = new System.Security.Cryptography.X509Certificates.X509CertificateCollection
+            {
+                clientCert
+            };
+        }
+
+        if (tls.ServerNameOverride is not null)
+        {
+            sslOptions.TargetHost = tls.ServerNameOverride;
+        }
+
+        handler.SslOptions = sslOptions;
         return handler;
     }
 
